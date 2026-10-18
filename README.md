@@ -23,6 +23,18 @@ There's a second set that runs against the real Gemini models: fake system messa
 npm run test:live
 ```
 
+## The onchain part
+
+`anchor/programs/lowball` keeps the shop honest about money.
+
+A cash deal gets a receipt account: list price, what you paid, who paid. A friends deal gets a vault. Your x402 payment goes straight into it, and it sits there. Every purchase through your link adds one to the count, one per wallet, and your own wallet doesn't count. Once the count hits the number you agreed, anyone can call `release` and the merchant gets paid. If the deadline passes first, anyone can call `refund` and you get it all back. Top the vault up to the full price and it releases without the friends. Either way the vault closes and the rent goes home.
+
+The shop server is the only one who can say "this payment settled" or "this friend bought". It can't move the money. Only those two rules can.
+
+```
+cd anchor && anchor test
+```
+
 ## Credit where it's due
 
 Nibble already sells a haggling chatbot to Shopify stores, which proved shoppers will happily argue with a bot. Pinduoduo made "bring friends, pay less" normal for hundreds of millions of people. Lowball puts the haggle and the friends in the same conversation, and makes the chain enforce both.
