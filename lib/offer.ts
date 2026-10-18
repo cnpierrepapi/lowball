@@ -46,6 +46,8 @@ export function verifyOffer(token: string | null, itemId: string, now = Date.now
   } catch {
     return { ok: false, reason: "malformed" };
   }
+  // noble throws, rather than returning false, on a signature of the wrong length.
+  if (sig.length !== 64) return { ok: false, reason: "malformed" };
   if (!ed25519.verify(sig, body, offerPublicKey())) return { ok: false, reason: "bad_signature" };
   if (offer.item !== itemId) return { ok: false, reason: "wrong_item" };
   if (!(offer.exp > now)) return { ok: false, reason: "expired" };
