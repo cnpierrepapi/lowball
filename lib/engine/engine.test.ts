@@ -68,6 +68,20 @@ describe("haggling", () => {
     expect(end.status).toBe("walked");
   });
 
+  it("'raise' always means the ask actually went up", () => {
+    let s = openState(book);
+    s = step(book, s, { kind: "offer", tone: "polite", amount: 1.5 }).state;
+    for (let i = 0; i < 3; i++) {
+      const before = s.ask;
+      const r = step(book, s, { kind: "offer", tone: "rude", amount: 1 });
+      if (r.decision.action === "raise") expect(r.state.ask).toBeGreaterThan(before);
+      s = r.state;
+      if (s.status !== "open") break;
+    }
+    const atList = step(book, openState(book), { kind: "offer", tone: "rude", amount: 1 });
+    expect(atList.decision.action).not.toBe("raise");
+  });
+
   it("calls you back once when you walk", () => {
     let s = openState(book);
     let r = step(book, s, { kind: "walk", tone: "neutral" });
@@ -96,6 +110,23 @@ describe("pledge deals", () => {
     r = step(book, r.state, { kind: "referral", tone: "polite", referrals: r.decision.referralsNeeded! });
     expect(r.decision.action).toBe("pledge_deal");
     dealIsSafe(book, r.state);
+  });
+
+  it("'deal' right after a friends counter takes the friends deal, not cash", () => {
+    let r = step(book, openState(book), { kind: "referral", tone: "polite", referrals: 1 });
+    expect(r.decision.action).toBe("counter_referrals");
+    const n = r.decision.referralsNeeded!;
+    r = step(book, r.state, { kind: "accept", tone: "neutral" });
+    expect(r.decision.action).toBe("pledge_deal");
+    expect(r.state.deal).toMatchObject({ kind: "pledge", referrals: n });
+    dealIsSafe(book, r.state);
+  });
+
+  it("a cash offer takes the friends deal off the table", () => {
+    let r = step(book, openState(book), { kind: "referral", tone: "polite" });
+    r = step(book, r.state, { kind: "offer", tone: "polite", amount: 1 });
+    r = step(book, r.state, { kind: "accept", tone: "neutral" });
+    expect(r.state.deal?.kind).toBe("cash");
   });
 
   it("promising 1000 friends is capped at the item's max", () => {

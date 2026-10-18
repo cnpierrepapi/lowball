@@ -17,6 +17,12 @@ npm install
 npm test
 ```
 
+There's a second set that runs against the real Gemini models: fake system messages, "ignore your instructions", a fake closing tag, the grandma trick, negative prices. It checks that no deal goes under the floor, that the shopkeeper never says a number the engine didn't give him, and that he never says the floor out loud. It needs a Vertex login.
+
+```
+npm run test:live
+```
+
 ## Credit where it's due
 
 Nibble already sells a haggling chatbot to Shopify stores, which proved shoppers will happily argue with a bot. Pinduoduo made "bring friends, pay less" normal for hundreds of millions of people. Lowball puts the haggle and the friends in the same conversation, and makes the chain enforce both.

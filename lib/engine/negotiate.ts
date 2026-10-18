@@ -29,6 +29,7 @@ export interface State {
   status: "open" | "deal" | "walked";
   calledBack: boolean;
   referralCounter?: number; // friends the shopkeeper is currently asking for
+  referralOnTable?: boolean; // the last thing he said was a friends number, so "deal" means that deal
   deal?: Deal;
 }
 
@@ -110,6 +111,11 @@ export function step(item: Item, prev: State, intent: Intent): { state: State; d
   switch (intent.kind) {
     case "accept": {
       s.status = "deal";
+      if (s.referralOnTable && s.referralCounter) {
+        const n = s.referralCounter;
+        s.deal = { kind: "pledge", price: pledgePrice(item, s.ask, n), referrals: n };
+        return decide("pledge_deal", { deal: s.deal });
+      }
       s.deal = { kind: "cash", price: s.ask };
       return decide("deal", { deal: s.deal });
     }
@@ -129,6 +135,7 @@ export function step(item: Item, prev: State, intent: Intent): { state: State; d
       const target = referralTarget(item, s.mood);
       if (intent.referrals === undefined) {
         s.referralCounter = s.referralCounter ?? Math.min(target + 1, item.maxReferrals);
+        s.referralOnTable = true;
         return decide("ask_referral_count", { referralsNeeded: s.referralCounter });
       }
       const offered = Math.min(intent.referrals, item.maxReferrals);
@@ -139,11 +146,13 @@ export function step(item: Item, prev: State, intent: Intent): { state: State; d
         return decide("pledge_deal", { deal: s.deal });
       }
       s.referralCounter = Math.max(target, asking - 1);
+      s.referralOnTable = true;
       return decide("counter_referrals", { referralsNeeded: s.referralCounter });
     }
 
     case "offer": {
       s.round += 1;
+      s.referralOnTable = false;
       const offer = toCents(toMicro(intent.amount ?? 0));
       const insulted = offer < item.floor / 2;
       if (insulted) s.mood = clamp(s.mood - 0.1, -1, 1);
@@ -163,8 +172,12 @@ export function step(item: Item, prev: State, intent: Intent): { state: State; d
       }
 
       if (angry) {
-        s.ask = clamp(toCents(s.ask + (item.list - s.ask) * 0.15), item.floor, item.list);
-        return decide("raise", { insulted });
+        const raised = clamp(toCents(s.ask + Math.max((item.list - s.ask) * 0.15, 5 * CENT)), item.floor, item.list);
+        if (raised > s.ask) {
+          s.ask = raised;
+          return decide("raise", { insulted });
+        }
+        return decide("hold", { insulted }); // already at list, nowhere higher to go
       }
 
       if (s.round >= item.maxRounds) return decide("final_offer", { insulted });
