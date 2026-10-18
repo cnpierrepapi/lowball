@@ -14,14 +14,20 @@ const conn = provider.connection;
 const authority = (provider.wallet as anchor.Wallet).payer;
 
 const USDC = 1_000_000;
-const item = Buffer.alloc(32);
-item.write("overlords");
+const itemId = (s: string) => {
+  const b = Buffer.alloc(32);
+  b.write(s);
+  return Array.from(b);
+};
+const item = itemId("overlords");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const nonce = () => Array.from(Keypair.generate().publicKey.toBytes().slice(0, 16));
-const pda = (seeds: (Buffer | Uint8Array)[]) => PublicKey.findProgramAddressSync(seeds, program.programId)[0];
-const shopPda = pda([Buffer.from("shop")]);
+const pda = (seeds: (Buffer | Uint8Array)[], programId = program.programId) =>
+  PublicKey.findProgramAddressSync(seeds, programId)[0];
 const pledgePda = (n: number[]) => pda([Buffer.from("pledge"), Buffer.from(n)]);
+const dealPda = (n: number[]) => pda([Buffer.from("deal"), Buffer.from(n)]);
+const programData = pda([program.programId.toBuffer()], new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111"));
 
 // Capture first, assert after: an assert.fail inside try/catch can match its own message.
 async function expectError(p: Promise<unknown>, code: string) {
@@ -54,14 +60,43 @@ describe("lowball", () => {
     merchantAta = (await getOrCreateAssociatedTokenAccount(conn, authority, mint, merchant.publicKey)).address;
     buyerAta = (await getOrCreateAssociatedTokenAccount(conn, authority, mint, buyer.publicKey)).address;
     await mintTo(conn, authority, mint, buyerAta, authority, 100 * USDC);
-    await program.methods.initShop().accounts({ mint, authority: authority.publicKey } as any).rpc();
   });
 
-  async function openPledge(opts: { price: number; full: number; required: number; deadlineIn: number }) {
+  const initShop = (deployer: Keypair) =>
+    program.methods
+      .initShop(authority.publicKey)
+      .accounts({ program: program.programId, programData, mint, deployer: deployer.publicKey } as any)
+      .signers(deployer === authority ? [] : [deployer])
+      .rpc();
+
+  describe("shop", () => {
+    it("only the upgrade authority can set the shop up", async () => {
+      await expectError(initShop(await funded()), "NotAdmin");
+      await initShop(authority);
+      const shop = await program.account.shop.fetch(pda([Buffer.from("shop")]));
+      assert.ok(shop.authority.equals(authority.publicKey));
+      assert.ok(shop.mint.equals(mint));
+    });
+  });
+
+  // A cash purchase the shop saw settle.
+  async function recordDeal(who: PublicKey, opts: { item?: number[]; list?: number; paid?: number } = {}) {
+    const n = nonce();
+    await program.methods
+      .recordDeal(n, opts.item ?? item, who, new anchor.BN(opts.list ?? 2 * USDC), new anchor.BN(opts.paid ?? 1.2 * USDC))
+      .accounts({ authority: authority.publicKey } as any)
+      .rpc();
+    return dealPda(n);
+  }
+
+  async function openPledge(opts: { price: number; full: number; required: number; deadlineIn: number; buyer?: PublicKey }) {
     const n = nonce();
     const deadline = new anchor.BN(Math.floor(Date.now() / 1000) + opts.deadlineIn);
     await program.methods
-      .openPledge(n, Array.from(item), merchant.publicKey, new anchor.BN(opts.price), new anchor.BN(opts.full), opts.required, deadline)
+      .openPledge(
+        n, item, merchant.publicKey, opts.buyer ?? buyer.publicKey,
+        new anchor.BN(opts.price), new anchor.BN(opts.full), opts.required, deadline,
+      )
       .accounts({ mint, authority: authority.publicKey } as any)
       .rpc();
     const pledge = pledgePda(n);
@@ -70,40 +105,40 @@ describe("lowball", () => {
   }
 
   const pay = (vault: PublicKey, amount: number) => transfer(conn, buyer, buyerAta, vault, buyer, amount);
-  const fund = (pledge: PublicKey) =>
-    program.methods.fundPledge(buyer.publicKey).accounts({ pledge, authority: authority.publicKey } as any).rpc();
-  const refer = (pledge: PublicKey, who: PublicKey) =>
-    program.methods.recordReferral(who).accounts({ pledge, authority: authority.publicKey } as any).rpc();
+  const refer = (pledge: PublicKey, deal: PublicKey) =>
+    program.methods.recordReferral().accounts({ pledge, deal, authority: authority.publicKey } as any).rpc();
   const release = (pledge: PublicKey) =>
     program.methods.release().accounts({ pledge, merchantAta, rentTo: authority.publicKey } as any).rpc();
   const refund = (pledge: PublicKey) =>
     program.methods.refund().accounts({ pledge, buyerAta, rentTo: authority.publicKey } as any).rpc();
+  const cancel = (pledge: PublicKey) =>
+    program.methods.cancelPledge().accounts({ pledge, authority: authority.publicKey } as any).rpc();
   const balance = async (a: PublicKey) => Number((await getAccount(conn, a)).amount);
+  const gone = async (...accounts: PublicKey[]) => {
+    for (const a of accounts) assert.isNull(await conn.getAccountInfo(a), `${a.toBase58()} should be closed`);
+  };
 
   describe("deal receipts", () => {
     it("records a cash deal once per offer", async () => {
       const n = nonce();
-      await program.methods
-        .recordDeal(n, Array.from(item), buyer.publicKey, new anchor.BN(2 * USDC), new anchor.BN(1.57 * USDC))
-        .accounts({ authority: authority.publicKey } as any)
-        .rpc();
-      const d = await program.account.deal.fetch(pda([Buffer.from("deal"), Buffer.from(n)]));
+      const record = (paid: number) =>
+        program.methods
+          .recordDeal(n, item, buyer.publicKey, new anchor.BN(2 * USDC), new anchor.BN(paid))
+          .accounts({ authority: authority.publicKey } as any)
+          .rpc();
+      await record(1.57 * USDC);
+      const d = await program.account.deal.fetch(dealPda(n));
       assert.equal(d.paid.toNumber(), 1.57 * USDC);
       assert.ok(d.buyer.equals(buyer.publicKey));
-      await expectError(
-        program.methods
-          .recordDeal(n, Array.from(item), buyer.publicKey, new anchor.BN(2 * USDC), new anchor.BN(1 * USDC))
-          .accounts({ authority: authority.publicKey } as any)
-          .rpc(),
-        "already in use",
-      );
+      assert.isFalse(d.counted);
+      await expectError(record(1 * USDC), "already in use");
     });
 
     it("refuses a receipt from anyone but the shop", async () => {
       const impostor = await funded();
       await expectError(
         program.methods
-          .recordDeal(nonce(), Array.from(item), buyer.publicKey, new anchor.BN(2 * USDC), new anchor.BN(1))
+          .recordDeal(nonce(), item, buyer.publicKey, new anchor.BN(2 * USDC), new anchor.BN(1))
           .accounts({ authority: impostor.publicKey } as any)
           .signers([impostor])
           .rpc(),
@@ -112,92 +147,143 @@ describe("lowball", () => {
     });
 
     it("refuses paid above list", async () => {
+      await expectError(recordDeal(buyer.publicKey, { list: 1 * USDC, paid: 2 * USDC }), "BadAmounts");
+    });
+
+    it("the shop can close a receipt and get its rent back", async () => {
+      const deal = await recordDeal(buyer.publicKey);
+      const impostor = await funded();
       await expectError(
-        program.methods
-          .recordDeal(nonce(), Array.from(item), buyer.publicKey, new anchor.BN(1 * USDC), new anchor.BN(2 * USDC))
-          .accounts({ authority: authority.publicKey } as any)
-          .rpc(),
-        "BadAmounts",
+        program.methods.closeDeal().accounts({ deal, authority: impostor.publicKey } as any).signers([impostor]).rpc(),
+        "ConstraintHasOne",
       );
+      await program.methods.closeDeal().accounts({ deal, authority: authority.publicKey } as any).rpc();
+      await gone(deal);
     });
   });
 
   describe("pledges", () => {
-    it("friends show up: the merchant gets paid and the vault closes", async () => {
+    it("friends show up: the merchant gets paid, vault and pledge close", async () => {
       const { pledge, vault } = await openPledge({ price: 1 * USDC, full: 2 * USDC, required: 2, deadlineIn: 600 });
-      await expectError(fund(pledge), "NotFunded"); // nothing paid yet
+      const friend1 = Keypair.generate().publicKey;
+      const early = await recordDeal(friend1);
+      await expectError(refer(pledge, early), "NotFunded"); // nothing paid yet
       await pay(vault, 1 * USDC);
-      await fund(pledge);
 
       await expectError(release(pledge), "NotYet");
-      await expectError(refer(pledge, buyer.publicKey), "SelfReferral");
-      const friend1 = Keypair.generate().publicKey;
-      await refer(pledge, friend1);
-      await expectError(refer(pledge, friend1), "already in use"); // same friend twice
+      await expectError(refer(pledge, await recordDeal(buyer.publicKey)), "SelfReferral");
+      await refer(pledge, early);
+      assert.isTrue((await program.account.deal.fetch(early)).counted);
+      await expectError(refer(pledge, early), "AlreadyCounted"); // same receipt twice
+      await expectError(refer(pledge, await recordDeal(friend1)), "AlreadyCounted"); // same friend, new receipt
       await expectError(release(pledge), "NotYet");
-      await refer(pledge, Keypair.generate().publicKey);
+      await refer(pledge, await recordDeal(Keypair.generate().publicKey));
+      assert.equal((await program.account.pledge.fetch(pledge)).referred.length, 2);
 
       const before = await balance(merchantAta);
+      const rentBefore = await conn.getBalance(authority.publicKey);
       await release(pledge);
       assert.equal((await balance(merchantAta)) - before, 1 * USDC);
-      assert.isNull(await conn.getAccountInfo(vault), "vault closed");
-      const p = await program.account.pledge.fetch(pledge);
-      assert.deepEqual(p.status, { released: {} });
-      // The vault is gone, so a second release can't even load its accounts.
+      await gone(vault, pledge);
+      assert.isAbove(await conn.getBalance(authority.publicKey), rentBefore, "rent came home");
       await expectError(release(pledge), "AccountNotInitialized");
     });
 
-    it("no friends by the deadline: the buyer gets everything back", async () => {
-      const { pledge, vault } = await openPledge({ price: 1 * USDC, full: 2 * USDC, required: 3, deadlineIn: 4 });
+    it("a friend's own pledge, an old purchase, or another item can't count", async () => {
+      const old = await recordDeal(Keypair.generate().publicKey);
+      await sleep(1000); // let the slot move on
+      const { pledge, vault } = await openPledge({ price: 1 * USDC, full: 2 * USDC, required: 2, deadlineIn: 600 });
       await pay(vault, 1 * USDC);
-      await fund(pledge);
-      await refer(pledge, Keypair.generate().publicKey);
+      await expectError(refer(pledge, old), "OldReceipt");
+      await expectError(refer(pledge, await recordDeal(Keypair.generate().publicKey, { item: itemId("other") })), "WrongItem");
+      // A pledge account is not a receipt, so it fails the deal's seeds and type.
+      const friendsPledge = await openPledge({ price: 1, full: 2 * USDC, required: 1, deadlineIn: 600, buyer: Keypair.generate().publicKey });
+      await expectError(refer(pledge, friendsPledge.pledge), "AccountDiscriminatorMismatch");
+      // Both pledges are open when the friend buys, so only the one-use rule can stop a double count.
+      const second = await openPledge({ price: 1 * USDC, full: 2 * USDC, required: 1, deadlineIn: 600 });
+      await pay(second.vault, 1 * USDC);
+      const shared = await recordDeal(Keypair.generate().publicKey);
+      await refer(pledge, shared);
+      await refer(pledge, await recordDeal(Keypair.generate().publicKey));
+      await expectError(refer(pledge, await recordDeal(Keypair.generate().publicKey)), "Enough");
+      await release(pledge);
+      await cancel(friendsPledge.pledge);
+
+      // One friend's purchase can't count for two different pledgers.
+      await expectError(refer(second.pledge, shared), "AlreadyCounted");
+      await refer(second.pledge, await recordDeal(Keypair.generate().publicKey));
+      await release(second.pledge);
+    });
+
+    it("no friends by the deadline: the buyer gets everything back, no server step needed", async () => {
+      const { pledge, vault } = await openPledge({ price: 1 * USDC, full: 2 * USDC, required: 3, deadlineIn: 4 });
+      await pay(vault, 1 * USDC); // the server never hears about this payment
+      await refer(pledge, await recordDeal(Keypair.generate().publicKey));
       await expectError(refund(pledge), "NotYet"); // too early
       await sleep(6000);
-      await expectError(refer(pledge, Keypair.generate().publicKey), "DeadlinePassed");
+      await expectError(refer(pledge, await recordDeal(Keypair.generate().publicKey)), "DeadlinePassed");
       await expectError(release(pledge), "NotYet");
       const before = await balance(buyerAta);
       await refund(pledge);
       assert.equal((await balance(buyerAta)) - before, 1 * USDC);
-      assert.isNull(await conn.getAccountInfo(vault), "vault closed");
-      assert.deepEqual((await program.account.pledge.fetch(pledge)).status, { refunded: {} });
+      await gone(vault, pledge);
     });
 
     it("topping up to the full price releases without the friends, and can't be refunded", async () => {
       const { pledge, vault } = await openPledge({ price: 1 * USDC, full: 2 * USDC, required: 4, deadlineIn: 4 });
       await pay(vault, 1 * USDC);
-      await fund(pledge);
       await pay(vault, 1 * USDC); // the gap
       await sleep(6000);
       await expectError(refund(pledge), "NotRefundable");
       const before = await balance(merchantAta);
       await release(pledge);
       assert.equal((await balance(merchantAta)) - before, 2 * USDC);
-      assert.deepEqual((await program.account.pledge.fetch(pledge)).status, { toppedUp: {} });
+      await gone(vault, pledge);
+    });
+
+    it("a payment that never settled can be cancelled, a paid one can't", async () => {
+      const unpaid = await openPledge({ price: 1 * USDC, full: 2 * USDC, required: 1, deadlineIn: 600 });
+      const impostor = await funded();
+      await expectError(
+        program.methods.cancelPledge().accounts({ pledge: unpaid.pledge, authority: impostor.publicKey } as any).signers([impostor]).rpc(),
+        "ConstraintHasOne",
+      );
+      const rentBefore = await conn.getBalance(authority.publicKey);
+      await cancel(unpaid.pledge);
+      await gone(unpaid.vault, unpaid.pledge);
+      assert.isAbove(await conn.getBalance(authority.publicKey), rentBefore);
+
+      const paid = await openPledge({ price: 1 * USDC, full: 2 * USDC, required: 1, deadlineIn: 600 });
+      await pay(paid.vault, 1);
+      await expectError(cancel(paid.pledge), "NotEmpty");
     });
 
     it("rejects bad pledges and outsiders", async () => {
       await expectError(openPledge({ price: 2 * USDC, full: 2 * USDC, required: 1, deadlineIn: 600 }), "BadAmounts");
       await expectError(openPledge({ price: 1 * USDC, full: 2 * USDC, required: 0, deadlineIn: 600 }), "BadReferrals");
+      await expectError(openPledge({ price: 1 * USDC, full: 2 * USDC, required: 11, deadlineIn: 600 }), "BadReferrals");
       await expectError(openPledge({ price: 1 * USDC, full: 2 * USDC, required: 1, deadlineIn: -5 }), "DeadlinePassed");
+      await expectError(openPledge({ price: 1 * USDC, full: 2 * USDC, required: 1, deadlineIn: 600, buyer: merchant.publicKey }), "BadBuyer");
+
       const { pledge, vault } = await openPledge({ price: 1 * USDC, full: 2 * USDC, required: 1, deadlineIn: 600 });
       await pay(vault, 1 * USDC);
       const impostor = await funded();
+      const deal = await recordDeal(Keypair.generate().publicKey);
       await expectError(
-        program.methods.fundPledge(impostor.publicKey).accounts({ pledge, authority: impostor.publicKey } as any).signers([impostor]).rpc(),
+        program.methods.recordReferral().accounts({ pledge, deal, authority: impostor.publicKey } as any).signers([impostor]).rpc(),
         "ConstraintHasOne",
       );
-      await fund(pledge);
-      await expectError(
-        program.methods.recordReferral(Keypair.generate().publicKey).accounts({ pledge, authority: impostor.publicKey } as any).signers([impostor]).rpc(),
-        "ConstraintHasOne",
-      );
+      await refer(pledge, deal);
       // Paying the release to someone who isn't the merchant fails.
       const otherAta = (await getOrCreateAssociatedTokenAccount(conn, authority, mint, impostor.publicKey)).address;
-      await refer(pledge, Keypair.generate().publicKey);
       await expectError(
         program.methods.release().accounts({ pledge, merchantAta: otherAta, rentTo: authority.publicKey } as any).rpc(),
         "ConstraintTokenOwner",
+      );
+      // And so does sending the rent anywhere but the shop.
+      await expectError(
+        program.methods.release().accounts({ pledge, merchantAta, rentTo: impostor.publicKey } as any).rpc(),
+        "ConstraintAddress",
       );
       await release(pledge);
     });

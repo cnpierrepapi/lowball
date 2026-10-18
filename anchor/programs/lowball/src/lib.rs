@@ -4,19 +4,25 @@ use anchor_spl::token::{self, CloseAccount, Mint, Token, TokenAccount, Transfer}
 
 declare_id!("AjbVvJWBTYy1685BRoythenR22ruYvPjbT2KYqcbKJh5");
 
+/// Most friends a pledge can ask for. Their wallets live in the pledge account itself.
+pub const MAX_REFERRALS: u8 = 10;
+
 /// Lowball: receipts for haggled deals, and vaults for deals paid in friends.
 ///
 /// The shop server (`shop.authority`) writes facts it has seen settle over x402: a cash deal,
-/// a funded pledge, a referred purchase. Money only ever leaves a vault by rules anyone can
-/// check and anyone can trigger: to the merchant once the friends showed up (or the buyer
+/// a pledge with its buyer, a friend's purchase. Money only ever leaves a vault by rules anyone
+/// can check and anyone can trigger: to the merchant once the friends showed up (or the buyer
 /// topped up to the full price), or back to the buyer once the deadline passed without them.
+/// Whether a pledge is paid is never the server's word, it's the vault balance.
 #[program]
 pub mod lowball {
     use super::*;
 
-    pub fn init_shop(ctx: Context<InitShop>) -> Result<()> {
+    /// Only the program's upgrade authority can set the shop up, so nobody can grab the shop
+    /// PDA between deploy and init.
+    pub fn init_shop(ctx: Context<InitShop>, authority: Pubkey) -> Result<()> {
         let shop = &mut ctx.accounts.shop;
-        shop.authority = ctx.accounts.authority.key();
+        shop.authority = authority;
         shop.mint = ctx.accounts.mint.key();
         shop.bump = ctx.bumps.shop;
         Ok(())
@@ -32,6 +38,7 @@ pub mod lowball {
         paid: u64,
     ) -> Result<()> {
         require!(paid > 0 && paid <= list_price, LowballError::BadAmounts);
+        require!(buyer != Pubkey::default(), LowballError::BadBuyer);
         let deal = &mut ctx.accounts.deal;
         deal.nonce = nonce;
         deal.item = item;
@@ -39,112 +46,133 @@ pub mod lowball {
         deal.list_price = list_price;
         deal.paid = paid;
         deal.slot = Clock::get()?.slot;
+        deal.counted = false;
         emit!(DealRecorded { nonce, buyer, list_price, paid });
         Ok(())
     }
 
-    /// Opens the vault a pledge payment goes into. The x402 `payTo` is the pledge address,
-    /// so the buyer's USDC lands in `vault` and nowhere else.
+    /// Hands a receipt's rent back once the server has it indexed.
+    pub fn close_deal(_ctx: Context<CloseDeal>) -> Result<()> {
+        Ok(())
+    }
+
+    /// Opens the vault a pledge payment goes into. Called after x402 has verified the payment
+    /// and before it settles, so the buyer is known up front and the vault exists for the
+    /// transfer. The x402 `payTo` is the pledge address, so the USDC lands in `vault` only.
     pub fn open_pledge(
         ctx: Context<OpenPledge>,
         nonce: [u8; 16],
         item: [u8; 32],
         merchant: Pubkey,
+        buyer: Pubkey,
         price: u64,
         full_price: u64,
         required: u8,
         deadline: i64,
     ) -> Result<()> {
         require!(price > 0 && price < full_price, LowballError::BadAmounts);
-        require!(required >= 1, LowballError::BadReferrals);
+        require!(required >= 1 && required <= MAX_REFERRALS, LowballError::BadReferrals);
         require!(deadline > Clock::get()?.unix_timestamp, LowballError::DeadlinePassed);
+        require!(buyer != Pubkey::default() && buyer != merchant, LowballError::BadBuyer);
         let p = &mut ctx.accounts.pledge;
         p.nonce = nonce;
         p.item = item;
         p.merchant = merchant;
-        p.buyer = Pubkey::default();
+        p.buyer = buyer;
         p.price = price;
         p.full_price = full_price;
         p.required = required;
-        p.count = 0;
         p.deadline = deadline;
-        p.status = PledgeStatus::Open;
+        p.opened_slot = Clock::get()?.slot;
+        p.referred = Vec::new();
         p.bump = ctx.bumps.pledge;
+        emit!(PledgeOpened { nonce, buyer, price, required, deadline });
         Ok(())
     }
 
-    /// The buyer's payment settled into the vault. The vault balance is checked here, so a
-    /// pledge can't be marked funded on the server's word alone.
-    pub fn fund_pledge(ctx: Context<FundPledge>, buyer: Pubkey) -> Result<()> {
+    /// A friend bought through the pledger's link. The friend's cash receipt is the proof: same
+    /// item, bought after the pledge opened, never the pledger or the merchant, one count per
+    /// wallet and one use per receipt. A friend's own pledge has no receipt, so it can't count.
+    pub fn record_referral(ctx: Context<RecordReferral>) -> Result<()> {
         let p = &mut ctx.accounts.pledge;
-        require!(p.status == PledgeStatus::Open, LowballError::WrongStatus);
+        let d = &mut ctx.accounts.deal;
         require!(ctx.accounts.vault.amount >= p.price, LowballError::NotFunded);
-        require!(buyer != Pubkey::default() && buyer != p.merchant, LowballError::BadBuyer);
-        p.buyer = buyer;
-        p.status = PledgeStatus::Funded;
-        emit!(PledgeFunded { nonce: p.nonce, buyer, price: p.price, required: p.required, deadline: p.deadline });
-        Ok(())
-    }
-
-    /// Someone bought through the pledger's link. One count per wallet, never the pledger.
-    pub fn record_referral(ctx: Context<RecordReferral>, referred: Pubkey) -> Result<()> {
-        let p = &mut ctx.accounts.pledge;
-        require!(p.status == PledgeStatus::Funded, LowballError::WrongStatus);
         require!(Clock::get()?.unix_timestamp < p.deadline, LowballError::DeadlinePassed);
-        require!(referred != p.buyer && referred != p.merchant, LowballError::SelfReferral);
-        p.count = p.count.saturating_add(1);
-        let r = &mut ctx.accounts.referral;
-        r.pledge = p.key();
-        r.referred = referred;
-        emit!(ReferralRecorded { nonce: p.nonce, referred, count: p.count, required: p.required });
+        require!(d.item == p.item, LowballError::WrongItem);
+        require!(d.slot >= p.opened_slot, LowballError::OldReceipt);
+        require!(!d.counted, LowballError::AlreadyCounted);
+        require!(d.buyer != p.buyer && d.buyer != p.merchant, LowballError::SelfReferral);
+        require!(!p.referred.contains(&d.buyer), LowballError::AlreadyCounted);
+        require!(p.referred.len() < p.required as usize, LowballError::Enough);
+        d.counted = true;
+        p.referred.push(d.buyer);
+        emit!(ReferralRecorded { nonce: p.nonce, referred: d.buyer, count: p.referred.len() as u8, required: p.required });
         Ok(())
     }
 
     /// Pays the merchant once the friends showed up, or once the buyer topped the vault up to
-    /// the full price. Anyone can call it.
+    /// the full price. Anyone can call it. The vault and the pledge both close.
     pub fn release(ctx: Context<Release>) -> Result<()> {
         let p = &ctx.accounts.pledge;
-        require!(p.status == PledgeStatus::Funded, LowballError::WrongStatus);
         let vault_amount = ctx.accounts.vault.amount;
-        let friends_came = p.count >= p.required;
-        let topped_up = vault_amount >= p.full_price;
-        require!(friends_came || topped_up, LowballError::NotYet);
+        let friends_came = p.friends_came(vault_amount);
+        require!(friends_came || vault_amount >= p.full_price, LowballError::NotYet);
 
         empty_vault(
             &ctx.accounts.token_program,
             &ctx.accounts.vault,
             &ctx.accounts.merchant_ata.to_account_info(),
             &ctx.accounts.rent_to,
-            &ctx.accounts.pledge,
+            p,
             vault_amount,
         )?;
-        let p = &mut ctx.accounts.pledge;
-        p.status = if friends_came { PledgeStatus::Released } else { PledgeStatus::ToppedUp };
         emit!(PledgeReleased { nonce: p.nonce, amount: vault_amount, topped_up: !friends_came });
         Ok(())
     }
 
     /// After the deadline, with too few friends and no top-up, the buyer gets everything back.
-    /// Anyone can call it.
+    /// Anyone can call it. Works whether or not the server ever saw the payment.
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
         let p = &ctx.accounts.pledge;
-        require!(p.status == PledgeStatus::Funded, LowballError::WrongStatus);
         require!(Clock::get()?.unix_timestamp >= p.deadline, LowballError::NotYet);
         let vault_amount = ctx.accounts.vault.amount;
-        require!(p.count < p.required && vault_amount < p.full_price, LowballError::NotRefundable);
+        require!(!p.friends_came(vault_amount) && vault_amount < p.full_price, LowballError::NotRefundable);
 
         empty_vault(
             &ctx.accounts.token_program,
             &ctx.accounts.vault,
             &ctx.accounts.buyer_ata.to_account_info(),
             &ctx.accounts.rent_to,
-            &ctx.accounts.pledge,
+            p,
             vault_amount,
         )?;
-        let p = &mut ctx.accounts.pledge;
-        p.status = PledgeStatus::Refunded;
         emit!(PledgeRefunded { nonce: p.nonce, amount: vault_amount });
         Ok(())
+    }
+
+    /// The payment never settled: the shop closes the empty pledge and gets its rent back.
+    /// Only an empty vault can be cancelled, so there's never money in the way.
+    pub fn cancel_pledge(ctx: Context<CancelPledge>) -> Result<()> {
+        require!(ctx.accounts.vault.amount == 0, LowballError::NotEmpty);
+        let p = &ctx.accounts.pledge;
+        let seeds: &[&[u8]] = &[b"pledge", &p.nonce, &[p.bump]];
+        token::close_account(CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            CloseAccount {
+                account: ctx.accounts.vault.to_account_info(),
+                destination: ctx.accounts.authority.to_account_info(),
+                authority: p.to_account_info(),
+            },
+            &[seeds],
+        ))?;
+        emit!(PledgeCancelled { nonce: p.nonce });
+        Ok(())
+    }
+}
+
+impl Pledge {
+    fn friends_came(&self, vault_amount: u64) -> bool {
+        self.referred.len() >= self.required as usize && vault_amount >= self.price
     }
 }
 
@@ -168,7 +196,8 @@ fn empty_vault<'info>(
             amount,
         )?;
     }
-    // Closing the vault hands its rent back to the shop that paid for it.
+    // Closing the vault hands its rent back to the shop that paid for it. The pledge account
+    // closes through its `close` constraint.
     token::close_account(CpiContext::new_with_signer(
         token_program.to_account_info(),
         CloseAccount { account: vault.to_account_info(), destination: rent_to.clone(), authority: pledge.to_account_info() },
@@ -193,15 +222,7 @@ pub struct Deal {
     pub list_price: u64,
     pub paid: u64,
     pub slot: u64,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace)]
-pub enum PledgeStatus {
-    Open,
-    Funded,
-    Released,
-    ToppedUp,
-    Refunded,
+    pub counted: bool, // already used as a referral
 }
 
 #[account]
@@ -214,26 +235,24 @@ pub struct Pledge {
     pub price: u64,
     pub full_price: u64,
     pub required: u8,
-    pub count: u8,
     pub deadline: i64,
-    pub status: PledgeStatus,
+    pub opened_slot: u64,
+    #[max_len(10)]
+    pub referred: Vec<Pubkey>,
     pub bump: u8,
-}
-
-#[account]
-#[derive(InitSpace)]
-pub struct Referral {
-    pub pledge: Pubkey,
-    pub referred: Pubkey,
 }
 
 #[derive(Accounts)]
 pub struct InitShop<'info> {
-    #[account(init, payer = authority, space = 8 + Shop::INIT_SPACE, seeds = [b"shop"], bump)]
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ LowballError::NotAdmin)]
+    pub program: Program<'info, crate::program::Lowball>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(deployer.key()) @ LowballError::NotAdmin)]
+    pub program_data: Account<'info, ProgramData>,
+    #[account(init, payer = deployer, space = 8 + Shop::INIT_SPACE, seeds = [b"shop"], bump)]
     pub shop: Account<'info, Shop>,
     pub mint: Account<'info, Mint>,
     #[account(mut)]
-    pub authority: Signer<'info>,
+    pub deployer: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -247,6 +266,16 @@ pub struct RecordDeal<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CloseDeal<'info> {
+    #[account(seeds = [b"shop"], bump = shop.bump, has_one = authority)]
+    pub shop: Account<'info, Shop>,
+    #[account(mut, close = authority, seeds = [b"deal", deal.nonce.as_ref()], bump)]
+    pub deal: Account<'info, Deal>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
 }
 
 #[derive(Accounts)]
@@ -267,47 +296,29 @@ pub struct OpenPledge<'info> {
 }
 
 #[derive(Accounts)]
-pub struct FundPledge<'info> {
+pub struct RecordReferral<'info> {
     #[account(seeds = [b"shop"], bump = shop.bump, has_one = authority)]
     pub shop: Account<'info, Shop>,
     #[account(mut, seeds = [b"pledge", pledge.nonce.as_ref()], bump = pledge.bump)]
     pub pledge: Account<'info, Pledge>,
     #[account(associated_token::mint = shop.mint, associated_token::authority = pledge)]
     pub vault: Account<'info, TokenAccount>,
+    #[account(mut, seeds = [b"deal", deal.nonce.as_ref()], bump)]
+    pub deal: Account<'info, Deal>,
     pub authority: Signer<'info>,
-}
-
-#[derive(Accounts)]
-#[instruction(referred: Pubkey)]
-pub struct RecordReferral<'info> {
-    #[account(seeds = [b"shop"], bump = shop.bump, has_one = authority)]
-    pub shop: Account<'info, Shop>,
-    #[account(mut, seeds = [b"pledge", pledge.nonce.as_ref()], bump = pledge.bump)]
-    pub pledge: Account<'info, Pledge>,
-    #[account(
-        init,
-        payer = authority,
-        space = 8 + Referral::INIT_SPACE,
-        seeds = [b"ref", pledge.key().as_ref(), referred.as_ref()],
-        bump
-    )]
-    pub referral: Account<'info, Referral>,
-    #[account(mut)]
-    pub authority: Signer<'info>,
-    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
 pub struct Release<'info> {
     #[account(seeds = [b"shop"], bump = shop.bump)]
     pub shop: Account<'info, Shop>,
-    #[account(mut, seeds = [b"pledge", pledge.nonce.as_ref()], bump = pledge.bump)]
+    #[account(mut, close = rent_to, seeds = [b"pledge", pledge.nonce.as_ref()], bump = pledge.bump)]
     pub pledge: Account<'info, Pledge>,
     #[account(mut, associated_token::mint = shop.mint, associated_token::authority = pledge)]
     pub vault: Account<'info, TokenAccount>,
     #[account(mut, token::mint = shop.mint, token::authority = pledge.merchant)]
     pub merchant_ata: Account<'info, TokenAccount>,
-    /// CHECK: only receives the vault's rent; pinned to the shop authority.
+    /// CHECK: only receives rent; pinned to the shop authority.
     #[account(mut, address = shop.authority)]
     pub rent_to: AccountInfo<'info>,
     pub token_program: Program<'info, Token>,
@@ -317,15 +328,28 @@ pub struct Release<'info> {
 pub struct Refund<'info> {
     #[account(seeds = [b"shop"], bump = shop.bump)]
     pub shop: Account<'info, Shop>,
-    #[account(mut, seeds = [b"pledge", pledge.nonce.as_ref()], bump = pledge.bump)]
+    #[account(mut, close = rent_to, seeds = [b"pledge", pledge.nonce.as_ref()], bump = pledge.bump)]
     pub pledge: Account<'info, Pledge>,
     #[account(mut, associated_token::mint = shop.mint, associated_token::authority = pledge)]
     pub vault: Account<'info, TokenAccount>,
     #[account(mut, token::mint = shop.mint, token::authority = pledge.buyer)]
     pub buyer_ata: Account<'info, TokenAccount>,
-    /// CHECK: only receives the vault's rent; pinned to the shop authority.
+    /// CHECK: only receives rent; pinned to the shop authority.
     #[account(mut, address = shop.authority)]
     pub rent_to: AccountInfo<'info>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct CancelPledge<'info> {
+    #[account(seeds = [b"shop"], bump = shop.bump, has_one = authority)]
+    pub shop: Account<'info, Shop>,
+    #[account(mut, close = authority, seeds = [b"pledge", pledge.nonce.as_ref()], bump = pledge.bump)]
+    pub pledge: Account<'info, Pledge>,
+    #[account(mut, associated_token::mint = shop.mint, associated_token::authority = pledge)]
+    pub vault: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -338,7 +362,7 @@ pub struct DealRecorded {
 }
 
 #[event]
-pub struct PledgeFunded {
+pub struct PledgeOpened {
     pub nonce: [u8; 16],
     pub buyer: Pubkey,
     pub price: u64,
@@ -367,16 +391,19 @@ pub struct PledgeRefunded {
     pub amount: u64,
 }
 
+#[event]
+pub struct PledgeCancelled {
+    pub nonce: [u8; 16],
+}
+
 #[error_code]
 pub enum LowballError {
     #[msg("Amounts don't make sense")]
     BadAmounts,
-    #[msg("A pledge needs at least one friend")]
+    #[msg("A pledge needs between 1 and 10 friends")]
     BadReferrals,
     #[msg("The deadline has passed")]
     DeadlinePassed,
-    #[msg("Wrong pledge status for this")]
-    WrongStatus,
     #[msg("The vault doesn't hold the pledge price yet")]
     NotFunded,
     #[msg("Bad buyer")]
@@ -387,4 +414,16 @@ pub enum LowballError {
     NotYet,
     #[msg("This pledge can't be refunded")]
     NotRefundable,
+    #[msg("Only the program's upgrade authority can do this")]
+    NotAdmin,
+    #[msg("That receipt is for a different item")]
+    WrongItem,
+    #[msg("That purchase happened before the pledge opened")]
+    OldReceipt,
+    #[msg("That purchase or wallet already counted")]
+    AlreadyCounted,
+    #[msg("The pledge already has all its friends")]
+    Enough,
+    #[msg("The vault isn't empty")]
+    NotEmpty,
 }
