@@ -1,6 +1,7 @@
 // Spike: haggle a deal with the real engine, sign the offer, then pay for it over x402 on devnet.
-// Usage: npx tsx --env-file=.env.local scripts/pay.mts [baseUrl] [expire]
+// Usage: npx tsx --env-file=.env.local scripts/pay.mts [baseUrl] [expire] [twice]
 //   expire: sign an already-expired offer to check the failure path.
+//   twice: replay the same offer after paying, which must be refused.
 import { createKeyPairSignerFromBytes } from "@solana/kit";
 import { toClientSvmSigner } from "@x402/svm";
 import { ExactSvmScheme } from "@x402/svm/exact/client";
@@ -48,3 +49,9 @@ const res = await paidFetch(url);
 console.log("status", res.status, await res.text());
 const pr = res.headers.get("PAYMENT-RESPONSE");
 if (pr) console.log("settlement", decodePaymentResponseHeader(pr));
+
+if (process.argv.includes("twice")) {
+  // Same signed offer again: must be refused before any second payment is asked for.
+  const again = await paidFetch(url);
+  console.log("replay status", again.status, await again.text(), "paid again:", again.headers.has("PAYMENT-RESPONSE"));
+}
