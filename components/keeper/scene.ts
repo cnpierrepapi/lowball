@@ -386,11 +386,12 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
   ro.observe(canvas);
   resize();
 
-  const clock = new THREE.Clock();
+  const timer = new THREE.Timer();
   let raf = 0;
-  function frame() {
-    const dt = Math.min(0.05, clock.getDelta());
-    const t = clock.elapsedTime;
+  function frame(now?: number) {
+    timer.update(now);
+    const dt = Math.min(0.05, timer.getDelta());
+    const t = timer.getElapsed();
     const ease = (cur: number, to: number, rate: number) => cur + (to - cur) * (1 - Math.exp(-rate * dt));
     mood = ease(mood, moodTarget, 4);
     talk = ease(talk, talkTarget, 18);

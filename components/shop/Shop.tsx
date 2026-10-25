@@ -234,7 +234,9 @@ export function Shop({ refNonce }: { refNonce?: string }) {
   }
 
   const list = item?.list;
-  const off = list && ask && ask < list ? Math.round((1 - ask / list) * 100) : 0;
+  // Once there's a deal, the card shows what you shook on, not his last ask.
+  const shown = deal?.price ?? ask;
+  const off = list && shown && shown < list ? Math.round((1 - shown / list) * 100) : 0;
   const moodIdx = Math.max(0, Math.min(4, Math.round((mood + 1) * 2)));
   const lastLine = [...msgs].reverse().find((m) => m.who === "keeper")?.text;
   const shareLink = result?.kind === "pledged" ? `${typeof location === "undefined" ? "" : location.origin}/r/${result.nonce}` : "";
@@ -278,10 +280,10 @@ export function Shop({ refNonce }: { refNonce?: string }) {
           <p className="text-sm text-[#151311]/70">{item?.blurb ?? "A survival guide written entirely in the finest AI slop."}</p>
           <div className="mt-3 flex items-end justify-between">
             <div>
-              <p className="text-xs font-bold uppercase tracking-widest text-[#151311]/60">{copy.hisPrice}</p>
-              <p className="font-mono text-3xl font-bold">
-                {list && ask !== undefined && ask < list && <span className="mr-2 text-lg text-[#151311]/40 line-through">{formatUsdc(list)}</span>}
-                {ask !== undefined ? formatUsdc(ask) : "?.??"} <span className="text-base">USDC</span>
+              <p className="text-xs font-bold uppercase tracking-widest text-[#151311]/60">{deal ? copy.yourDeal : copy.hisPrice}</p>
+              <p className="font-display text-4xl font-extrabold tracking-tight">
+                {list && shown !== undefined && shown < list && <span className="mr-2 text-xl font-bold text-[#151311]/35 line-through">{formatUsdc(list)}</span>}
+                {shown !== undefined ? formatUsdc(shown) : "?.??"} <span className="text-lg">USDC</span>
               </p>
             </div>
             {off > 0 && <span className="rounded-lg bg-[#19a866] px-2 py-1 font-mono text-lg font-bold text-white">-{off}%</span>}

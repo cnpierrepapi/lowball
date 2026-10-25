@@ -10,6 +10,7 @@ export const copy = {
   placeholder: "Make him an offer",
   send: "Say it",
   hisPrice: "His price",
+  yourDeal: "Your deal",
   listed: "Sticker price, if he had stickers",
   mood: "Mood",
   moods: ["Livid", "Fuming", "Grumpy", "Tolerating you", "Almost fond"],
