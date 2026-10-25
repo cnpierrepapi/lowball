@@ -73,7 +73,14 @@ export function shopSigner(): Promise<KeyPairSigner> {
     const raw = process.env.SHOP_KEYPAIR ??
       (process.env.NODE_ENV !== "production" ? readFileSync(".keys/shop.json", "utf8") : undefined);
     if (!raw) throw new Error("SHOP_KEYPAIR is not set");
-    return createKeyPairSignerFromBytes(new Uint8Array(JSON.parse(raw)));
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(JSON.parse(raw));
+    } catch {
+      // Never pass the parse error on: it quotes the input, which is the secret key.
+      throw new Error("SHOP_KEYPAIR is not a JSON array of 64 bytes");
+    }
+    return createKeyPairSignerFromBytes(bytes);
   })();
   return signer;
 }

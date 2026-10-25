@@ -1,4 +1,4 @@
-import { generate, textOf } from "./vertex";
+import { generate, textOf, VertexConfigError } from "./vertex";
 import { sanitizeIntent, type Intent } from "./engine/intent";
 import { formatUsdc } from "./engine/money";
 import type { Decision, Item } from "./engine/negotiate";
@@ -161,6 +161,7 @@ Reply with the shopkeeper's line only.`;
       const line = textOf(parts).replace(/^shopkeeper:\s*/i, "").replace(/^"|"$/g, "");
       if (line && lineIsHonest(line, allowed)) return line;
     } catch (e) {
+      if (e instanceof VertexConfigError) throw e;
       console.error("speak failed, using the safe line:", (e as Error).message);
     }
   }

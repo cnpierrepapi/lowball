@@ -1,4 +1,5 @@
 import { generate } from "./vertex";
+import { seal, unseal } from "./seal";
 
 export const VOICE_MODEL = process.env.LOWBALL_VOICE_MODEL ?? "gemini-3.8-flash-tts";
 export const VOICE = process.env.LOWBALL_VOICE ?? "Gacrux";
@@ -10,6 +11,20 @@ export function voiceText(line: string): string {
   const lead = line.match(/^\s*(\[[^\]]*\]\s*)+/)?.[0] ?? "";
   const rest = line.slice(lead.length).replace(/\[[^\]]*\]\s*/g, "");
   return (lead.trim() + " " + rest.replace(/\s{2,}/g, " ").trim()).trim();
+}
+
+// A voice token names one shop line and expires. Expiry is rounded up to the hour, so the same
+// line in the same hour gives the same token, the same URL, and a CDN cache hit. The opening
+// line is the same for every customer, so most voice requests never reach the model.
+const BUCKET = 3600;
+
+export function voiceToken(line: string, now = Math.floor(Date.now() / 1000)): string {
+  return seal("line", { l: line, exp: (Math.floor(now / BUCKET) + 2) * BUCKET });
+}
+
+export function readVoiceToken(token: string | null, now = Math.floor(Date.now() / 1000)): string | undefined {
+  const v = unseal<{ l: string; exp: number }>("line", token);
+  return v && typeof v.l === "string" && v.exp > now ? v.l : undefined;
 }
 
 export async function speakAudio(taggedLine: string): Promise<{ mimeType: string; data: string }> {
