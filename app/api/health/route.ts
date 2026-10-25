@@ -3,7 +3,7 @@ import { address, getAddressDecoder } from "@solana/kit";
 import { offerPublicKey } from "@/lib/offer";
 import { merchantAddress } from "@/lib/x402";
 import { vertexReady } from "@/lib/vertex";
-import { PROGRAM_ID, rpc, shopAddress, shopSigner, usdcAccount } from "@/lib/chain";
+import { PROGRAM_ID, rpc, shopAddress, shopSigner, usdcAccount, usdcBalance } from "@/lib/chain";
 
 // Everything the shop needs to take money, checked for real. Any failure is a 503, so a
 // misconfigured deploy shows up here instead of as a shopkeeper who never deals.
@@ -41,6 +41,11 @@ export async function GET() {
       const { value } = await rpc.getBalance((await shopSigner()).address).send();
       // Each pledge fronts ~0.006 SOL of rent until it closes.
       if (value < BigInt(50_000_000)) throw new Error(`shop authority low on SOL: ${Number(value) / 1e9}`);
+    }),
+    // The merchant doubles as the demo-wallet tap; judges get nothing if it runs dry.
+    tap: await check(async () => {
+      const usdc = await usdcBalance(await usdcAccount(address(merchantAddress())));
+      if (usdc < 4_000_000) throw new Error(`demo-wallet tap low: ${usdc / 1e6} USDC`);
     }),
     vertex: await check(() => vertexReady()),
   };

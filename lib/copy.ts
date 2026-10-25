@@ -41,6 +41,8 @@ export const copy = {
     none: "No wallet? Take a demo one. It comes with 2 test USDC.",
     getDemo: "Get a demo wallet",
     toPay: "Grab a demo wallet to pay",
+    connect: (name: string) => `Pay with ${name}`,
+    real: (name: string, addr: string, bal: string) => `${name} ${addr.slice(0, 4)}..${addr.slice(-4)}, ${bal} USDC`,
     funding: "Filling it up...",
     demo: (bal: string) => `Demo wallet, ${bal} USDC`,
     low: "Out of test USDC.",
@@ -57,6 +59,8 @@ export const copy = {
     expired: "That handshake went cold. Haggle again.",
     payment_failed: "The payment didn't go through. Nothing was taken.",
     drip_limited: "That's all the free test money for now.",
+    tap_dry: "The shop's out of test money. Grab devnet USDC at faucet.circle.com.",
+    wallet_refused: "Your wallet said no. Try again, or take a demo wallet.",
     generic: "Something broke. Try again.",
   } as Record<string, string>,
 };

@@ -1,13 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { KeyPairSigner } from "@solana/kit";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { TransactionSigner } from "@solana/kit";
+import type { Wallet as StdWallet } from "@wallet-standard/base";
 import { Keeper } from "@/components/keeper/Keeper";
 import type { Keeper as Controller } from "@/components/keeper/scene";
 import { copy } from "@/lib/copy";
 import { formatUsdc } from "@/lib/engine/money";
 import { createDemoWallet, loadDemoWallet, payingFetch, usdcOf } from "@/lib/client/wallet";
 import { createVoice, type Voice } from "@/lib/client/voice";
+import { connectWallet, subscribeWallets, walletsServerSnapshot, walletsSnapshot } from "@/lib/client/injected";
 import { decodePaymentResponseHeader } from "@x402/core/http";
 
 type Deal = { kind: "cash"; price: number } | { kind: "pledge"; price: number; referrals: number };
@@ -16,6 +18,8 @@ interface ItemInfo { id: string; name: string; blurb: string; list: number }
 interface Pledge {
   status: string; count?: number; required?: number; deadline?: number; paid?: number; topUp?: number; price?: number;
 }
+// The wallet paying: the in-browser demo one, or a real one connected through Wallet Standard.
+interface Payer { signer: TransactionSigner; address: string; label: string; demo: boolean }
 type Result =
   | { kind: "delivered"; title: string; tx?: string }
   | { kind: "pledged"; nonce: string; required: number; claim: string };
@@ -41,7 +45,8 @@ export function Shop({ refNonce }: { refNonce?: string }) {
   const [error, setError] = useState<string>();
   const [muted, setMuted] = useState(false);
 
-  const [wallet, setWallet] = useState<KeyPairSigner | null>(null);
+  const [wallet, setWallet] = useState<Payer | null>(null);
+  const installed = useSyncExternalStore(subscribeWallets, walletsSnapshot, walletsServerSnapshot);
   const [balance, setBalance] = useState<number>();
   const [funding, setFunding] = useState(false);
 
@@ -60,7 +65,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
   useEffect(() => {
     loadDemoWallet().then(async (w) => {
       if (!w) return;
-      setWallet(w);
+      setWallet({ signer: w, address: w.address, label: "Demo wallet", demo: true });
       setBalance(await usdcOf(w.address));
     });
     const claim = new URLSearchParams(location.search).get("claim");
@@ -168,8 +173,12 @@ export function Shop({ refNonce }: { refNonce?: string }) {
     setFunding(true);
     setError(undefined);
     try {
-      const w = wallet ?? (await createDemoWallet());
-      setWallet(w);
+      let w = wallet;
+      if (!w) {
+        const k = await createDemoWallet();
+        w = { signer: k, address: k.address, label: "Demo wallet", demo: true };
+        setWallet(w);
+      }
       const r = await fetch("/api/drip", { method: "POST", body: JSON.stringify({ wallet: w.address }) });
       if (!r.ok) setError(errorText((await r.json()).error));
       setBalance(await usdcOf(w.address));
@@ -178,12 +187,23 @@ export function Shop({ refNonce }: { refNonce?: string }) {
     }
   }
 
+  async function connect(std: StdWallet) {
+    setError(undefined);
+    try {
+      const signer = await connectWallet(std);
+      setWallet({ signer, address: signer.address, label: signer.label, demo: false });
+      setBalance(await usdcOf(signer.address));
+    } catch {
+      setError(copy.errors.wallet_refused);
+    }
+  }
+
   async function pay() {
     if (!wallet || !offer || !deal) return;
     setBusy(true);
     setError(undefined);
     try {
-      const r = await payingFetch(wallet)(`/api/item/${ITEM}?offer=${offer}`);
+      const r = await payingFetch(wallet.signer)(`/api/item/${ITEM}?offer=${offer}`);
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
         setError(r.status === 402 ? copy.errors.payment_failed : errorText(j.error));
@@ -210,7 +230,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
     setBusy(true);
     setError(undefined);
     try {
-      const r = await payingFetch(wallet)(`/api/pledge/${result.nonce}/topup`);
+      const r = await payingFetch(wallet.signer)(`/api/pledge/${result.nonce}/topup`);
       if (!r.ok) setError(r.status === 402 ? copy.errors.payment_failed : errorText((await r.json().catch(() => ({}))).error));
       setPledge(await fetch(`/api/pledge/${result.nonce}`).then((x) => x.json()));
       setBalance(await usdcOf(wallet.address));
@@ -395,9 +415,18 @@ export function Shop({ refNonce }: { refNonce?: string }) {
                     {busy ? copy.paying : deal.kind === "cash" ? copy.payCash(deal.price) : copy.payPledge(deal.price, deal.referrals)}
                   </button>
                 ) : (
-                  <button onClick={getDemoWallet} disabled={funding} className="rounded-full bg-[#151311] py-4 font-display text-xl font-extrabold text-white shadow-[4px_4px_0_#ff4a24] disabled:opacity-50">
-                    {funding ? copy.wallet.funding : copy.wallet.toPay}
-                  </button>
+                  <>
+                    <button onClick={getDemoWallet} disabled={funding} className="rounded-full bg-[#151311] py-4 font-display text-xl font-extrabold text-white shadow-[4px_4px_0_#ff4a24] disabled:opacity-50">
+                      {funding ? copy.wallet.funding : copy.wallet.toPay}
+                    </button>
+                    {installed.map((w) => (
+                      <button key={w.name} onClick={() => connect(w)} className="flex items-center justify-center gap-2 rounded-full border-2 border-[#151311] bg-white py-3 font-bold">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={w.icon} alt="" className="h-5 w-5" />
+                        {copy.wallet.connect(w.name)}
+                      </button>
+                    ))}
+                  </>
                 )}
               </div>
             )}
@@ -410,7 +439,9 @@ export function Shop({ refNonce }: { refNonce?: string }) {
         <div className="mt-auto flex items-center justify-between gap-2 rounded-xl border-2 border-[#151311]/15 px-3 py-2 text-sm">
           {wallet ? (
             <>
-              <span className="font-mono">{copy.wallet.demo(formatUsdc(balance ?? 0))}</span>
+              <span className="font-mono">
+                {wallet.demo ? copy.wallet.demo(formatUsdc(balance ?? 0)) : copy.wallet.real(wallet.label, wallet.address, formatUsdc(balance ?? 0))}
+              </span>
               {(balance ?? 0) < 1_000_000 && (
                 <button onClick={getDemoWallet} disabled={funding} className="font-bold text-[#ff4a24] underline disabled:opacity-50">
                   {funding ? copy.wallet.funding : copy.wallet.refill}
@@ -420,9 +451,17 @@ export function Shop({ refNonce }: { refNonce?: string }) {
           ) : (
             <>
               <span>{copy.wallet.none}</span>
-              <button onClick={getDemoWallet} disabled={funding} className="shrink-0 rounded-full bg-[#151311] px-3 py-1.5 font-bold text-white disabled:opacity-50">
-                {funding ? copy.wallet.funding : copy.wallet.getDemo}
-              </button>
+              <div className="flex shrink-0 gap-1">
+                {installed.slice(0, 2).map((w) => (
+                  <button key={w.name} onClick={() => connect(w)} title={copy.wallet.connect(w.name)} className="rounded-full border-2 border-[#151311] bg-white p-1">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={w.icon} alt={w.name} className="h-5 w-5" />
+                  </button>
+                ))}
+                <button onClick={getDemoWallet} disabled={funding} className="rounded-full bg-[#151311] px-3 py-1.5 font-bold text-white disabled:opacity-50">
+                  {funding ? copy.wallet.funding : copy.wallet.getDemo}
+                </button>
+              </div>
             </>
           )}
         </div>

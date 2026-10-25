@@ -42,6 +42,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const [shop, merchant] = await Promise.all([shopSigner(), merchantSigner()]);
+    if ((await usdcBalance(await usdcAccount(merchant.address))) < DRIP) {
+      console.error("drip: the tap is dry, top up the merchant with devnet USDC");
+      return NextResponse.json({ error: "tap_dry" }, { status: 503 });
+    }
     const mint = address(USDC_DEVNET);
     const tx = await send([
       getCreateAssociatedTokenIdempotentInstruction({ payer: shop, owner: to, mint, ata }),

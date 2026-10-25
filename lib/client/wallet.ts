@@ -1,4 +1,4 @@
-import { createKeyPairSignerFromBytes, type KeyPairSigner } from "@solana/kit";
+import { createKeyPairSignerFromBytes, type KeyPairSigner, type TransactionSigner } from "@solana/kit";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { x402Client } from "@x402/core/client";
 import { wrapFetchWithPayment } from "@x402/fetch";
@@ -33,7 +33,7 @@ export async function usdcOf(wallet: string): Promise<number> {
 }
 
 /** fetch that pays 402s with this signer, capped well above anything in the shop. */
-export function payingFetch(signer: KeyPairSigner): typeof fetch {
+export function payingFetch(signer: TransactionSigner): typeof fetch {
   const client = x402Client.fromConfig({
     schemes: [{ network: "solana:*", client: new ExactSvmScheme(toClientSvmSigner(signer)) }],
     spendControls: { maxAmountPerPayment: "$5" },
