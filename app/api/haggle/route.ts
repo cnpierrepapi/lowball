@@ -12,10 +12,14 @@ interface Session {
   state: State;
   history: Turn[];
   exp: number;
+  ref?: string; // came in through a pledger's link
 }
 
 const SESSION_TTL = 60 * 60;
 const OFFER_TTL = 5 * 60;
+// How long a pledger's friends have to buy. Short in the demo so a refund can be shown live.
+const PLEDGE_WINDOW = Number(process.env.PLEDGE_WINDOW_SECONDS ?? 7 * 24 * 60 * 60);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function opening(name: string, list: number): string {
   return `[sarcastic] Ah, a customer. "${name}". ${formatUsdc(list)} USDC, and before you ask, no, there's no price tag.`;
@@ -30,7 +34,8 @@ export async function POST(req: NextRequest) {
     const item = SHELF[String(body.item ?? "")];
     if (!item) return NextResponse.json({ error: "no_such_item" }, { status: 404 });
     const line = opening(item.name, item.list);
-    const session: Session = { item: item.id, state: openState(item), history: [{ who: "keeper", text: displayText(line) }], exp: now + SESSION_TTL };
+    const ref = typeof body.ref === "string" && UUID.test(body.ref) ? body.ref : undefined;
+    const session: Session = { item: item.id, state: openState(item), history: [{ who: "keeper", text: displayText(line) }], exp: now + SESSION_TTL, ref };
     return NextResponse.json({
       line: displayText(line),
       voice: seal("line", line),
@@ -58,7 +63,10 @@ export async function POST(req: NextRequest) {
 
   const offer =
     decision.deal && (decision.action === "deal" || decision.action === "pledge_deal")
-      ? signOffer({ v: 1, item: item.id, deal: decision.deal, exp: now + OFFER_TTL, nonce: randomUUID() })
+      ? signOffer({
+          v: 1, item: item.id, deal: decision.deal, exp: now + OFFER_TTL, nonce: randomUUID(),
+          ...(decision.deal.kind === "pledge" ? { deadline: now + PLEDGE_WINDOW } : { ref: session.ref }),
+        })
       : undefined;
 
   return NextResponse.json({

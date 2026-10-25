@@ -10,6 +10,8 @@ export interface Offer {
   deal: Deal;
   exp: number; // unix seconds
   nonce: string;
+  deadline?: number; // pledges: unix seconds by which the friends must have bought
+  ref?: string; // cash deals made through a pledger's link: that pledge's nonce
 }
 
 const enc = new TextEncoder();
