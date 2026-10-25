@@ -1,0 +1,14 @@
+# CLI deploys upload only what the app needs to build. Allowlist, so nothing local
+# (wallet keys, env files, notes) can ride along.
+/*
+!/app
+!/components
+!/lib
+!/public
+!/package.json
+!/package-lock.json
+!/next.config.ts
+!/tsconfig.json
+!/next-env.d.ts
+!/eslint.config.mjs
+!/README.md
