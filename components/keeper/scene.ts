@@ -122,6 +122,88 @@ function hatGroup() {
   return group;
 }
 
+const facet = (geo: THREE.BufferGeometry, base: string, shade: string, seed: number) =>
+  new THREE.Mesh(paintFacets(geo, new THREE.Color(base), new THREE.Color(shade), seed),
+    new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.85 }));
+
+/** The shop around him: a counter, a register, and two shelves of junk nobody priced. */
+function shopSet() {
+  const set = new THREE.Group();
+  // Counter: dark body, lighter top plank with a front lip.
+  const body = facet(new THREE.BoxGeometry(7, 1.3, 1.5, 6, 1, 1), "#7b4b2f", "#4e2c1a", 41);
+  body.position.set(0, -2.75, 0.9);
+  const top = facet(new THREE.BoxGeometry(7.3, 0.16, 1.8, 6, 1, 2), "#b9824f", "#8a5a34", 43);
+  top.position.set(0, -2.03, 0.95);
+  set.add(body, top);
+
+  // Cash register on the counter, off to his left.
+  const reg = new THREE.Group();
+  reg.add(facet(new THREE.BoxGeometry(0.9, 0.45, 0.7), "#2bb39b", "#1a7a69", 47));
+  const screen = facet(new THREE.BoxGeometry(0.5, 0.3, 0.08), "#1d2321", "#0c0f0e", 53);
+  screen.position.set(0, 0.42, -0.15);
+  screen.rotation.x = -0.35;
+  // The register's display can't show a price either.
+  const tag = document.createElement("canvas");
+  tag.width = 256; tag.height = 128;
+  const c = tag.getContext("2d")!;
+  c.fillStyle = "#16201c"; c.fillRect(0, 0, 256, 128);
+  c.fillStyle = "#7dffb0"; c.font = "bold 76px ui-monospace, monospace"; c.textAlign = "center"; c.textBaseline = "middle";
+  c.fillText("?.??", 128, 68);
+  const tex = new THREE.CanvasTexture(tag);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const display = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.24), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  display.position.z = 0.045;
+  screen.add(display);
+  const drawer = facet(new THREE.BoxGeometry(0.95, 0.12, 0.72), "#f4ede2", "#c9bfb2", 59);
+  drawer.position.y = -0.27;
+  reg.add(screen, drawer);
+  reg.position.set(2.35, -1.7, 1.0);
+  reg.rotation.y = -0.4;
+  set.add(reg);
+
+  // Shelves behind him, stuffed with things that have no price tags either.
+  const palette = ["#ff4d2e", "#2bb39b", "#f2b544", "#6d5bd0", "#e98a6b", "#3d3631", "#9cd8c4"];
+  let seed = 61;
+  let r = 12345;
+  const rand = () => ((r = (r * 16807) % 2147483647) / 2147483647);
+  const pick = () => palette[Math.floor(rand() * palette.length)];
+  for (const [y, w] of [[0.55, 6.4], [-0.75, 6.4]] as const) {
+    const plank = facet(new THREE.BoxGeometry(w, 0.1, 0.7), "#a87046", "#7a4d2e", seed++);
+    plank.position.set(0, y, -2.6);
+    set.add(plank);
+    let x = -w / 2 + 0.25;
+    while (x < w / 2 - 0.3) {
+      if (Math.abs(x) < 1.25) { x = 1.25; continue; } // keep his silhouette clear
+      seed++;
+      const kind = Math.floor(rand() * 4);
+      let m: THREE.Mesh, width: number;
+      if (kind === 0 || kind === 1) {
+        // a book, sometimes leaning
+        const h = 0.4 + rand() * 0.25;
+        width = 0.11 + rand() * 0.1;
+        m = facet(new THREE.BoxGeometry(width, h, 0.5), pick(), "#2a211d", seed);
+        m.position.set(x, y + 0.05 + h / 2, -2.6);
+        if (kind === 1) { m.rotation.z = -0.18; m.position.x += 0.04; }
+      } else if (kind === 2) {
+        // a jar
+        width = 0.36;
+        const jh = 0.3 + rand() * 0.2;
+        m = facet(new THREE.CylinderGeometry(0.14, 0.17, jh, 6), pick(), "#2a211d", seed);
+        m.position.set(x + 0.15, y + 0.05 + jh / 2, -2.6);
+      } else {
+        // a lumpy something
+        width = 0.4;
+        m = facet(new THREE.IcosahedronGeometry(0.19, 0), pick(), "#2a211d", seed);
+        m.position.set(x + 0.15, y + 0.24, -2.6);
+        m.rotation.set(rand() * 3, rand() * 3, 0);
+      }
+      set.add(m);
+      x += width + 0.06;
+    }
+  }
+  return set;
+}
+
 export function createKeeper(canvas: HTMLCanvasElement): Keeper {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
@@ -131,7 +213,7 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
-  camera.position.set(0, 0.25, 7.2);
+  
 
   // Warm key from the upper left, cool fill, a peach rim from behind (the cover's circle).
   scene.add(new THREE.HemisphereLight("#fff4e6", "#c98d6a", 1.1));
@@ -246,6 +328,39 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
   collar.position.y = -1.32;
   root.add(torso, neck, collar);
 
+  // Forearms on the counter, sleeves rolled, big fists. A slam lifts them and brings them down.
+  const skin = (geo: THREE.BufferGeometry, seed: number) => facet(geo, "#e9a87c", "#b46b42", seed);
+  const fists = [-1, 1].map((sx) => {
+    const arm = new THREE.Group();
+    // Forearm runs from the elbow (back, by his side) to the wrist (front, on the counter).
+    const forearm = skin(new THREE.CylinderGeometry(0.2, 0.26, 1.1, 6), 73 + sx);
+    forearm.rotation.x = Math.PI / 2;
+    forearm.position.set(0, 0, -0.55);
+    const sleeve = facet(new THREE.CylinderGeometry(0.33, 0.33, 0.35, 6), "#f4ede2", "#c9bfb2", 71 + sx);
+    sleeve.rotation.x = Math.PI / 2;
+    sleeve.position.set(0, 0.02, -1.05);
+    // Fist: a chunky palm block, a row of four knuckles on top, a thumb wrapped in front.
+    const fist = new THREE.Group();
+    fist.add(skin(new THREE.BoxGeometry(0.5, 0.36, 0.42), 79 + sx));
+    for (let i = 0; i < 4; i++) {
+      const kn = skin(new THREE.BoxGeometry(0.115, 0.13, 0.16), 83 + i);
+      kn.position.set(-0.18 + i * 0.12, 0.2, 0.13);
+      kn.rotation.x = 0.3;
+      fist.add(kn);
+    }
+    const thumb = skin(new THREE.BoxGeometry(0.3, 0.12, 0.13), 89 + sx);
+    thumb.position.set(sx * 0.06, 0.04, 0.23);
+    thumb.rotation.z = sx * -0.2;
+    fist.add(thumb);
+    fist.position.z = 0.12;
+    arm.add(forearm, sleeve, fist);
+    arm.position.set(sx * 1.3, -1.74, 1.15);
+    arm.rotation.y = sx * 0.28; // elbows out
+    scene.add(arm);
+    return arm;
+  });
+  scene.add(shopSet());
+
   // State, all eased every frame.
   let mood = -0.2, moodTarget = -0.2;
   let talk = 0, talkTarget = 0;
@@ -253,10 +368,18 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
   let blinkAt = 2, blink = 0;
   let kick = 0, kickKind: "scoff" | "slam" | "nod" = "nod";
 
+  // Frame the shop to the canvas: back off until the counter's width and the hat both fit.
   function resize() {
     const w = canvas.clientWidth, h = canvas.clientHeight;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
+    const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    // From the hat (~y 2.4) down to just under the countertop (~y -2.4); shelves are ~3.4 wide each side.
+    // On narrow screens the shelf ends get cropped so he stays big.
+    const halfW = camera.aspect < 1.3 ? 2.6 : 3.45;
+    const dist = Math.max(2.95 / tan, halfW / (tan * camera.aspect));
+    camera.position.set(0, 0.1, dist);
+    camera.lookAt(0, -0.05, 0);
     camera.updateProjectionMatrix();
   }
   const ro = new ResizeObserver(resize);
@@ -278,6 +401,9 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
     // Breathing and a slow idle sway.
     root.position.y = Math.sin(t * 1.6) * 0.025;
     const k = kick * kick;
+    // Slam: fists jump up then crash down; the whole body dips with them.
+    const lift = kickKind === "slam" ? Math.sin(Math.min(1, (1 - kick) * 2.2) * Math.PI) * 0.45 * kick : 0;
+    fists.forEach((f, i) => { f.position.y = -1.72 + lift + Math.sin(t * 1.6 + i) * 0.01; });
     head.rotation.y = look.x * 0.35 + Math.sin(t * 0.5) * 0.04;
     head.rotation.x = -look.y * 0.18 + talk * 0.05 * Math.sin(t * 9) +
       (kickKind === "scoff" ? -0.25 * k : kickKind === "nod" ? 0.2 * Math.sin(kick * 9) * kick : 0.1 * k);
@@ -329,7 +455,7 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
       scene.traverse((o) => {
         if (o instanceof THREE.Mesh) {
           o.geometry.dispose();
-          (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m.dispose());
+          (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.map?.dispose(); m.dispose(); });
         }
       });
       renderer.dispose();

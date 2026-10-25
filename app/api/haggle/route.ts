@@ -67,6 +67,8 @@ async function haggle(req: NextRequest) {
       voice: voiceToken(line, now),
       action: "open",
       ask: session.state.ask,
+      // Public details only. The floor never leaves the server.
+      item: { id: item.id, name: item.name, blurb: item.blurb, list: item.list },
       session: seal("session", session),
     });
   }

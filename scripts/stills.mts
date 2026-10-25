@@ -1,12 +1,13 @@
 // Close-up stills of the shopkeeper from /lab, for judging the look before anyone sees it.
-// Usage: npx tsx scripts/stills.mts [baseUrl]  -> <os tmp>/keeper-*.png
+// Usage: npx tsx scripts/stills.mts [baseUrl] [WxH]  -> <os tmp>/keeper-*.png
 import { chromium } from "playwright";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const base = process.argv[2] ?? "http://localhost:3000";
 const browser = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
-const page = await browser.newPage({ viewport: { width: 900, height: 900 }, deviceScaleFactor: 1 });
+const [w, h] = (process.argv[3] ?? "900x900").split("x").map(Number);
+const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
 page.on("console", (m) => m.type() === "error" && console.log("console:", m.text()));
 await page.goto(`${base}/lab`);
 await page.waitForFunction(() => "keeper" in window, null, { timeout: 60_000 });

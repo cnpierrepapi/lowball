@@ -11,8 +11,8 @@ const expose = (k: Controller) => {
 
 export default function Lab() {
   return (
-    <main className="h-screen w-screen bg-[#fdf3e7]">
-      <Keeper onReady={expose} className="h-full w-full" />
+    <main className="shop-backdrop relative h-screen w-screen">
+      <Keeper onReady={expose} className="relative h-full w-full" />
     </main>
   );
 }
