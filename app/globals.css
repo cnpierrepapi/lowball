@@ -27,3 +27,16 @@ body {
     radial-gradient(#e9d6c2 1.2px, transparent 1.3px);
   background-size: 100% 100%, 22px 22px;
 }
+
+/* Book pages: the reader and the preview. */
+.book h1 { font-family: var(--font-display-face); font-weight: 800; font-size: 2.25rem; line-height: 1.05; margin-bottom: 0.5rem; }
+.book h2 { font-family: var(--font-display-face); font-weight: 800; font-size: 1.5rem; margin: 2rem 0 0.75rem; }
+.book h3 { font-weight: 700; font-size: 1.1rem; margin: 1.25rem 0 0.5rem; color: #151311b3; }
+.book p { margin: 0 0 1rem; line-height: 1.65; }
+.book ul, .book ol { margin: 0 0 1rem 1.25rem; line-height: 1.6; }
+.book ul { list-style: disc; }
+.book ol { list-style: decimal; }
+.book blockquote { border-left: 4px solid #ff4a24; padding-left: 1rem; margin: 0 0 1rem; font-style: italic; }
+.book blockquote p { margin: 0; }
+.book hr { border: 0; border-top: 2px dashed #15131126; margin: 2rem 0; }
+.book em { color: #151311cc; }

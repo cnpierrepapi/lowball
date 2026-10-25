@@ -35,6 +35,15 @@ export const copy = {
   refunded: "Refunded. Every cent.",
   released: "Your friends came through. It's yours.",
 
+  peek: "Peek inside",
+  peekTitle: "A free look. She lets you read the first page standing up.",
+  peekClose: "Haggle for the rest",
+  reader: {
+    loading: "Fetching it from the back room...",
+    bad: "That link doesn't open anything. Check you copied all of it.",
+    notYet: "Not yours yet. It unlocks once the deal is done.",
+  },
+
   referred: "A friend sent you. Haggle like they did, and your buy counts for them.",
 
   wallet: {

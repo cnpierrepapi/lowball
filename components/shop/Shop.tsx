@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import type { TransactionSigner } from "@solana/kit";
 import type { Wallet as StdWallet } from "@wallet-standard/base";
 import { Keeper } from "@/components/keeper/Keeper";
+import { Markdown } from "@/components/Markdown";
 import type { Keeper as Controller } from "@/components/keeper/scene";
 import { copy } from "@/lib/copy";
 import { formatUsdc } from "@/lib/engine/money";
@@ -21,7 +22,7 @@ interface Pledge {
 // The wallet paying: the in-browser demo one, or a real one connected through Wallet Standard.
 interface Payer { signer: TransactionSigner; address: string; label: string; demo: boolean }
 type Result =
-  | { kind: "delivered"; title: string; tx?: string }
+  | { kind: "delivered"; title: string; claim: string; tx?: string }
   | { kind: "pledged"; nonce: string; required: number; claim: string };
 
 const ITEM = "overlords";
@@ -54,6 +55,13 @@ export function Shop({ refNonce }: { refNonce?: string }) {
   const [pledge, setPledge] = useState<Pledge>();
   const [friendPledge, setFriendPledge] = useState<Pledge>();
   const [copied, setCopied] = useState(false);
+  const [peek, setPeek] = useState<string | null>(null);
+
+  async function openPeek() {
+    setPeek("");
+    const r = await fetch(`/api/preview/${ITEM}`);
+    setPeek(r.ok ? (await r.json()).markdown : copy.errors.generic);
+  }
   const [now, setNow] = useState(0);
 
   const log = useRef<HTMLDivElement>(null);
@@ -72,7 +80,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
     if (claim) {
       fetch(`/api/claim?token=${encodeURIComponent(claim)}`).then(async (r) => {
         const j = await r.json();
-        if (j.status === "delivered") setResult({ kind: "delivered", title: j.title });
+        if (j.status === "delivered") setResult({ kind: "delivered", title: j.title, claim });
         else if (j.status === "pledged") {
           const nonce = String(j.pledge).split("/").pop()!;
           setResult({ kind: "pledged", nonce, required: 0, claim });
@@ -96,7 +104,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
       setNow(Math.floor(Date.now() / 1000));
       if (p.status === "released") {
         const c = await fetch(`/api/claim?token=${encodeURIComponent(result.claim)}`).then((x) => x.json());
-        if (c.status === "delivered") setResult({ kind: "delivered", title: c.title });
+        if (c.status === "delivered") setResult({ kind: "delivered", title: c.title, claim: result.claim });
       }
     };
     tick();
@@ -212,7 +220,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
       history.replaceState(null, "", `?claim=${encodeURIComponent(j.claim)}`);
       const pr = r.headers.get("PAYMENT-RESPONSE");
       const tx = pr ? decodePaymentResponseHeader(pr).transaction : j.recovered;
-      if (j.status === "delivered") setResult({ kind: "delivered", title: j.title, tx });
+      if (j.status === "delivered") setResult({ kind: "delivered", title: j.title, claim: j.claim, tx });
       else setResult({ kind: "pledged", nonce: String(j.link).split("/").pop()!, required: j.referralsNeeded, claim: j.claim });
       keeper.current?.react("nod");
       keeper.current?.setMood(0.8);
@@ -298,6 +306,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
         <div className="rounded-2xl border-2 border-[#151311] bg-white p-4 shadow-[4px_4px_0_#151311]">
           <p className="font-display text-lg font-extrabold leading-tight">{item?.name ?? "How to Give Up and Love Your AI Overlords"}</p>
           <p className="text-sm text-[#151311]/70">{item?.blurb ?? "A survival guide written entirely in the finest AI slop."}</p>
+          <button onClick={openPeek} className="mt-1 text-sm font-bold text-[#ff4a24] underline">{copy.peek}</button>
           <div className="mt-3 flex items-end justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-widest text-[#151311]/60">{deal ? copy.yourDeal : copy.hisPrice}</p>
@@ -324,7 +333,10 @@ export function Shop({ refNonce }: { refNonce?: string }) {
           <div className="rounded-2xl border-2 border-[#151311] bg-[#d6f5e6] p-4 shadow-[4px_4px_0_#151311]">
             <p className="text-xs font-bold uppercase tracking-widest text-[#19a866]">Deal sealed</p>
             <p className="font-display text-2xl font-extrabold">{copy.delivered}</p>
-            <p className="mt-1 text-sm">{copy.keepLink}</p>
+            <a href={`/read?claim=${encodeURIComponent(result.claim)}`} className="mt-3 inline-block rounded-full bg-[#151311] px-5 py-2 font-display text-lg font-extrabold text-white">
+              {copy.readIt}
+            </a>
+            <p className="mt-2 text-sm">{copy.keepLink}</p>
             {result.tx && (
               <a href={`https://explorer.solana.com/tx/${result.tx}?cluster=devnet`} target="_blank" rel="noreferrer" className="mt-2 inline-block font-mono text-xs font-bold underline">
                 {copy.receipt}
@@ -466,6 +478,20 @@ export function Shop({ refNonce }: { refNonce?: string }) {
           )}
         </div>
       </aside>
+
+      {peek !== null && (
+        <div role="dialog" aria-modal="true" aria-label={copy.peek} onClick={() => setPeek(null)} className="fixed inset-0 z-50 flex items-center justify-center bg-[#151311]/60 p-4">
+          <div onClick={(e) => e.stopPropagation()} className="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border-2 border-[#151311] bg-white shadow-[6px_6px_0_#ff4a24]">
+            <p className="border-b-2 border-[#151311] bg-[#fff6ea] px-5 py-3 text-sm font-semibold">{copy.peekTitle}</p>
+            <div className="overflow-y-auto px-6 py-5">
+              {peek ? <Markdown text={peek} /> : <p className="font-mono text-sm">{copy.reader.loading}</p>}
+            </div>
+            <button onClick={() => setPeek(null)} className="m-4 rounded-full bg-[#151311] py-3 font-display text-lg font-extrabold text-white">
+              {copy.peekClose}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
