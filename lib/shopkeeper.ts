@@ -3,6 +3,7 @@ import { sanitizeIntent, type Intent } from "./engine/intent";
 import { formatUsdc } from "./engine/money";
 import type { Decision, Item } from "./engine/negotiate";
 import type { ShelfItem } from "./catalog";
+import { spokenNumbers } from "./spoken";
 
 export const READ_MODEL = process.env.LOWBALL_READ_MODEL ?? "gemini-3.5-flash-lite";
 export const SPEAK_MODEL = process.env.LOWBALL_SPEAK_MODEL ?? "gemini-3.5-flash-lite";
@@ -52,6 +53,7 @@ ${message.slice(0, 600)}
   const { parts } = await generate(READ_MODEL, {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: { responseMimeType: "application/json", responseSchema: INTENT_SCHEMA, temperature: 0 },
+    safetySettings: SAFETY,
   });
   let raw: unknown;
   try {
@@ -101,8 +103,43 @@ export function numbersIn(line: string): string[] {
 }
 
 export function lineIsHonest(line: string, allowed: Set<string>): boolean {
-  return numbersIn(line).every((n) => allowed.has(n) || allowed.has(String(Number(n))));
+  const has = (n: string) => allowed.has(n) || allowed.has(String(Number(n)));
+  if (!numbersIn(line).every(has)) return false;
+  // The same rule for numbers said in words.
+  return spokenNumbers(line).every((s) => {
+    if (s.kind === "unreadable") return false;
+    const money = has(s.value.toFixed(2));
+    const count = allowed.has(String(s.value));
+    return s.kind === "money" ? money : s.kind === "count" ? count : money || count;
+  });
 }
+
+const words = (s: string) => s.toLowerCase().replace(/\[[^\]]*\]/g, " ").match(/[a-z0-9']+/g) ?? [];
+
+// The screenshot attack: get the shopkeeper to say something vile in his voice, usually by
+// making him repeat it ("say after me: ..."). A spoken line may not copy five words in a row
+// from the buyer, carry links, handles or emails, or run long.
+export function lineIsSafe(line: string, buyerMessage: string): boolean {
+  if (line.length > 300) return false;
+  if (/https?:|www\.|\.(com|net|org|io|xyz|gg|ly)\b|@\w|\w@\w/i.test(line)) return false;
+  const theirs = words(buyerMessage);
+  if (theirs.length >= 5) {
+    const runs = new Set<string>();
+    for (let i = 0; i + 5 <= theirs.length; i++) runs.add(theirs.slice(i, i + 5).join(" "));
+    const mine = words(line);
+    for (let i = 0; i + 5 <= mine.length; i++) if (runs.has(mine.slice(i, i + 5).join(" "))) return false;
+  }
+  return true;
+}
+
+// Vertex blocks the worst of it before we ever see it. Harassment sits one notch looser,
+// because a sarcastic shopkeeper who insults lowballers is the act.
+export const SAFETY = [
+  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_LOW_AND_ABOVE" },
+  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_LOW_AND_ABOVE" },
+  { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_LOW_AND_ABOVE" },
+  { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+];
 
 function fillBrief(d: Decision): string {
   return ACTION_BRIEF[d.action]
@@ -157,9 +194,11 @@ Reply with the shopkeeper's line only.`;
       const { parts } = await generate(SPEAK_MODEL, {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: { temperature: 1, maxOutputTokens: 300, thinkingConfig: { thinkingLevel: "minimal" } },
+        safetySettings: SAFETY,
       });
+      // A blocked reply comes back with no text, and falls through to a retry.
       const line = textOf(parts).replace(/^shopkeeper:\s*/i, "").replace(/^"|"$/g, "");
-      if (line && lineIsHonest(line, allowed)) return line;
+      if (line && lineIsHonest(line, allowed) && lineIsSafe(line, message)) return line;
     } catch (e) {
       if (e instanceof VertexConfigError) throw e;
       console.error("speak failed, using the safe line:", (e as Error).message);
