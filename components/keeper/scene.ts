@@ -222,7 +222,8 @@ function shopSet() {
   return set;
 }
 
-export function createKeeper(canvas: HTMLCanvasElement): Keeper {
+/** portrait: just her head and shoulders, no shop around her (covers, social images). */
+export function createKeeper(canvas: HTMLCanvasElement, { portrait = false } = {}): Keeper {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -387,10 +388,10 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
     arm.add(forearm, sleeve, fist);
     arm.position.set(sx * 1.3, -1.74, 1.15);
     arm.rotation.y = sx * 0.28; // elbows out
-    scene.add(arm);
+    if (!portrait) scene.add(arm);
     return arm;
   });
-  scene.add(shopSet());
+  if (!portrait) scene.add(shopSet());
 
   // State, all eased every frame.
   let mood = -0.2, moodTarget = -0.2;
@@ -407,10 +408,17 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
     const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     // From the hat (~y 2.4) down to just under the countertop (~y -2.4); shelves are ~3.4 wide each side.
     // On narrow screens the shelf ends get cropped so he stays big.
-    const halfW = camera.aspect < 1.3 ? 2.6 : 3.45;
-    const dist = Math.max(2.95 / tan, halfW / (tan * camera.aspect));
-    camera.position.set(0, 0.1, dist);
-    camera.lookAt(0, -0.05, 0);
+    if (portrait) {
+      // Hat to collar, centred on the face.
+      const dist = Math.max(1.95 / tan, 1.75 / (tan * camera.aspect));
+      camera.position.set(0, 0.35, dist);
+      camera.lookAt(0, 0.25, 0);
+    } else {
+      const halfW = camera.aspect < 1.3 ? 2.6 : 3.45;
+      const dist = Math.max(2.95 / tan, halfW / (tan * camera.aspect));
+      camera.position.set(0, 0.1, dist);
+      camera.lookAt(0, -0.05, 0);
+    }
     camera.updateProjectionMatrix();
   }
   const ro = new ResizeObserver(resize);
