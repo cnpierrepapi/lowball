@@ -12,7 +12,7 @@ body {
   font-family: var(--font-sans-body), system-ui, sans-serif;
 }
 
-/* His newest line pops in like a speech bubble. */
+/* Her newest line pops in like a speech bubble. */
 @keyframes bubble-in {
   from { opacity: 0; transform: translateY(8px) scale(0.96); }
   to { opacity: 1; transform: none; }

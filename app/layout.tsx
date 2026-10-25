@@ -8,7 +8,7 @@ const mono = JetBrains_Mono({ variable: "--font-mono-body", subsets: ["latin"] }
 
 export const metadata: Metadata = {
   title: "Lowball",
-  description: "Nothing in this shop has a price tag. Haggle with an AI shopkeeper and pay what you talk him down to, in USDC on Solana.",
+  description: "Nothing in this shop has a price tag. Haggle with an AI shopkeeper and pay what you talk her down to, in USDC on Solana.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

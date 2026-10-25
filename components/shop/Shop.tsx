@@ -254,7 +254,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
   }
 
   const list = item?.list;
-  // Once there's a deal, the card shows what you shook on, not his last ask.
+  // Once there's a deal, the card shows what you shook on, not her last ask.
   const shown = deal?.price ?? ask;
   const off = list && shown && shown < list ? Math.round((1 - shown / list) * 100) : 0;
   const moodIdx = Math.max(0, Math.min(4, Math.round((mood + 1) * 2)));
@@ -273,7 +273,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
           <p className="mt-2 hidden max-w-xs font-display text-2xl font-bold leading-tight lg:block">{copy.headline}</p>
         </header>
         {lastLine && (
-          <div key={lastLine} className="bubble-in absolute right-4 top-[30%] max-w-[min(340px,42%)] rounded-2xl border-2 border-[#151311] bg-white px-4 py-3 text-base font-semibold shadow-[4px_4px_0_#151311] lg:right-10 lg:text-lg">
+          <div key={lastLine} className="bubble-in absolute right-4 top-[30%] max-w-[min(300px,34%)] rounded-2xl border-2 border-[#151311] bg-white px-4 py-3 text-base font-semibold shadow-[4px_4px_0_#151311] lg:right-10 lg:text-lg">
             {lastLine}
           </div>
         )}

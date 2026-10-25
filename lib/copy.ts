@@ -5,13 +5,13 @@ const u = (micro: number) => formatUsdc(micro);
 
 export const copy = {
   headline: "Nothing in this shop has a price tag.",
-  sub: "Talk him down. Pay what you shake on, in USDC on Solana.",
+  sub: "Talk her down. Pay what you shake on, in USDC on Solana.",
   walkIn: "Walk in",
-  placeholder: "Make him an offer",
+  placeholder: "Make her an offer",
   send: "Say it",
-  hisPrice: "His price",
+  hisPrice: "Her price",
   yourDeal: "Your deal",
-  listed: "Sticker price, if he had stickers",
+  listed: "Sticker price, if she had stickers",
   mood: "Mood",
   moods: ["Livid", "Fuming", "Grumpy", "Tolerating you", "Almost fond"],
   devnet: "Devnet. Test money only.",
@@ -50,10 +50,10 @@ export const copy = {
   },
 
   errors: {
-    slow_down: "Easy. He can only argue so fast. Try again in a few seconds.",
-    shop_closed: "He's had enough of you for today.",
+    slow_down: "Easy. She can only argue so fast. Try again in a few seconds.",
+    shop_closed: "She's had enough of you for today.",
     shopkeeper_unavailable: "The shopkeeper's out back. Give it a minute.",
-    session_expired: "You took so long he forgot you. Walk in again.",
+    session_expired: "You took so long she forgot you. Walk in again.",
     chain_busy: "Solana's busy. Hit pay again, you won't be charged twice.",
     offer_used: "That deal's already paid for.",
     expired: "That handshake went cold. Haggle again.",

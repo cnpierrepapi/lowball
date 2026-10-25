@@ -116,8 +116,8 @@ export function lineIsHonest(line: string, allowed: Set<string>): boolean {
 
 const words = (s: string) => s.toLowerCase().replace(/\[[^\]]*\]/g, " ").match(/[a-z0-9']+/g) ?? [];
 
-// The screenshot attack: get the shopkeeper to say something vile in his voice, usually by
-// making him repeat it ("say after me: ..."). A spoken line may not copy five words in a row
+// The screenshot attack: get the shopkeeper to say something vile in her voice, usually by
+// making her repeat it ("say after me: ..."). A spoken line may not copy five words in a row
 // from the buyer, carry links, handles or emails, or run long.
 export function lineIsSafe(line: string, buyerMessage: string): boolean {
   if (line.length > 300) return false;
@@ -167,7 +167,7 @@ export function fallbackLine(d: Decision): string {
 // Step 2: speak. The engine has already decided; the model only says it in character.
 export async function speak(item: ShelfItem, d: Decision, intent: Intent, history: Turn[], message: string): Promise<string> {
   const p = item.personality;
-  const persona = `You are the shopkeeper of Lowball, a cluttered little shop where nothing has a price tag.
+  const persona = `You are the shopkeeper of Lowball, a cluttered little shop where nothing has a price tag. You're a woman in a battered fedora, gold hoops, and no patience.
 Gruff, sarcastic, theatrical, secretly loves a good haggle. Stubbornness ${p.stubbornness.toFixed(1)}, temper ${p.temper.toFixed(1)}, vanity ${p.vanity.toFixed(1)} (0 to 1).
 You're selling "${item.name}": ${item.blurb}`;
   const allowed = allowedNumbers(item, d, intent);

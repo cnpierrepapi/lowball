@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
-// The shopkeeper, built in code: faceted low-poly head, fedora, brows, eyes and a mustache that
-// all move with his mood and his voice. Flat shading plus a per-face colour jitter gives the
+// The shopkeeper, built in code: faceted low-poly head, fedora, a dark bob, brows, eyes and lips
+// that all move with her mood and her voice. Flat shading plus a per-face colour jitter gives the
 // cut-paper look of the cover art. No model files.
 
 export interface Keeper {
@@ -19,7 +19,8 @@ export interface Keeper {
 const SKIN = new THREE.Color("#e9a87c");
 const SKIN_SHADE = new THREE.Color("#c27a50");
 const HAT = new THREE.Color("#3d3631");
-const HAIR = new THREE.Color("#2a211d");
+const HAIR = new THREE.Color("#2a1d18");
+const LIPS = new THREE.Color("#b8333d");
 
 /** Gives every triangle its own colour: a lit-from-the-front gradient plus a little jitter. */
 function paintFacets(geo: THREE.BufferGeometry, base: THREE.Color, shade: THREE.Color, seed = 1) {
@@ -43,7 +44,7 @@ function paintFacets(geo: THREE.BufferGeometry, base: THREE.Color, shade: THREE.
   return g;
 }
 
-/** A faceted head: a coarse icosphere pushed into a square jaw, a chin, cheekbones and a brow ridge. */
+/** A faceted head: a coarse icosphere pushed into a tapered jaw, a neat chin and high cheekbones. */
 function headGeometry() {
   const g = new THREE.IcosahedronGeometry(1, 1);
   const p = g.getAttribute("position");
@@ -53,14 +54,15 @@ function headGeometry() {
     let { x, y, z } = v;
     y *= 1.18;
     if (y < 0) {
-      // Square jaw: sides stay wide until low, then cut in to a blunt chin.
-      const t = Math.min(1, -y / 1.18);
-      x *= 1 - 0.18 * t - 0.25 * t * t * t;
-      y -= 0.14 * t * t;
-      if (z > 0.4) z += 0.08 * t; // chin pushes forward
+      // Tapered jaw down to a small, neat chin; a shortish lower face.
+      y *= 0.88;
+      const t = Math.min(1, -y / 1.04);
+      x *= 1 - 0.3 * t - 0.22 * t * t;
+      y -= 0.1 * t * t;
+      if (z > 0.4) z += 0.05 * t; // chin forward a touch
     }
-    if (y > -0.2 && y < 0.3 && Math.abs(x) > 0.6) x *= 1.07; // cheekbones
-    if (y > 0.2 && y < 0.6 && z > 0.5) z += 0.1; // brow ridge
+    if (y > -0.05 && y < 0.35 && Math.abs(x) > 0.55) x *= 1.06; // high cheekbones
+    if (y > 0.2 && y < 0.6 && z > 0.5) z += 0.04; // soft brow
     if (y > 0.7) y *= 0.94; // flatter crown under the hat
     z *= z < 0 ? 0.85 : 1.06;
     p.setXYZ(i, x, y, z);
@@ -84,17 +86,33 @@ function noseGeometry() {
   return paintFacets(g, SKIN, SKIN_SHADE, 3);
 }
 
-function mustacheGeometry() {
-  // Half a handlebar, mirrored. Thick in the middle, curling up at the ends.
-  const pts: [number, number][] = [
-    [0, 0.02], [0.18, 0.04], [0.36, 0.0], [0.5, -0.06], [0.6, -0.02], [0.66, 0.08],
-    [0.6, 0.0], [0.5, -0.13], [0.34, -0.15], [0.16, -0.1], [0, -0.07],
-  ];
+/** One lip: a faceted crescent. The upper one has a cupid's bow, the lower one is fuller. */
+function lipGeometry(upper: boolean) {
+  const pts: [number, number][] = upper
+    ? [[0, 0.035], [0.06, 0.055], [0.15, 0.03], [0.24, -0.005], [0.15, -0.02], [0, -0.01]]
+    : [[0, 0.0], [0.15, 0.005], [0.23, 0.005], [0.15, -0.05], [0, -0.065]];
   const all = [...pts, ...pts.slice(1, -1).reverse().map(([x, y]) => [-x, y] as [number, number])];
   const shape = new THREE.Shape(all.map(([x, y]) => new THREE.Vector2(x, y)));
-  const g = new THREE.ExtrudeGeometry(shape, { depth: 0.12, bevelEnabled: true, bevelSize: 0.03, bevelThickness: 0.04, bevelSegments: 1 });
-  g.translate(0, 0, -0.06);
-  return paintFacets(g, HAIR, new THREE.Color("#120e0c"), 5);
+  const g = new THREE.ExtrudeGeometry(shape, { depth: 0.06, bevelEnabled: true, bevelSize: 0.015, bevelThickness: 0.025, bevelSegments: 1 });
+  g.translate(0, 0, -0.03);
+  return paintFacets(g, LIPS, new THREE.Color("#7a1c24"), upper ? 5 : 6);
+}
+
+/** Her bob: a shell around the head, flat at the front (hidden behind the face) and cut at the jaw. */
+function hairGeometry() {
+  const g = new THREE.IcosahedronGeometry(1, 1);
+  const p = g.getAttribute("position");
+  for (let i = 0; i < p.count; i++) {
+    let x = p.getX(i) * 1.2, y = p.getY(i) * 1.2, z = p.getZ(i) * 1.08;
+    // Flat behind the face in the middle, but the sides wrap forward to frame the cheeks.
+    const side = Math.min(1, Math.max(0, (Math.abs(x) - 0.55) / 0.45));
+    const zMax = 0.1 + 0.55 * side;
+    if (z > zMax) z = zMax + (z - zMax) * 0.1;
+    if (y < -0.62) y = -0.62 - (y + 0.62) * 0.15; // blunt cut at the jaw
+    if (y < -0.3) x *= 1.04; // flares out at the ends
+    p.setXYZ(i, x, y, z - 0.08);
+  }
+  return paintFacets(g, HAIR, new THREE.Color("#120c0a"), 13);
 }
 
 function hatGroup() {
@@ -126,7 +144,7 @@ const facet = (geo: THREE.BufferGeometry, base: string, shade: string, seed: num
   new THREE.Mesh(paintFacets(geo, new THREE.Color(base), new THREE.Color(shade), seed),
     new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.85 }));
 
-/** The shop around him: a counter, a register, and two shelves of junk nobody priced. */
+/** The shop around her: a counter, a register, and two shelves of junk nobody priced. */
 function shopSet() {
   const set = new THREE.Group();
   // Counter: dark body, lighter top plank with a front lip.
@@ -136,7 +154,7 @@ function shopSet() {
   top.position.set(0, -2.03, 0.95);
   set.add(body, top);
 
-  // Cash register on the counter, off to his left.
+  // Cash register on the counter, off to her left.
   const reg = new THREE.Group();
   reg.add(facet(new THREE.BoxGeometry(0.9, 0.45, 0.7), "#2bb39b", "#1a7a69", 47));
   const screen = facet(new THREE.BoxGeometry(0.5, 0.3, 0.08), "#1d2321", "#0c0f0e", 53);
@@ -161,7 +179,7 @@ function shopSet() {
   reg.rotation.y = -0.4;
   set.add(reg);
 
-  // Shelves behind him, stuffed with things that have no price tags either.
+  // Shelves behind her, stuffed with things that have no price tags either.
   const palette = ["#ff4d2e", "#2bb39b", "#f2b544", "#6d5bd0", "#e98a6b", "#3d3631", "#9cd8c4"];
   let seed = 61;
   let r = 12345;
@@ -173,7 +191,7 @@ function shopSet() {
     set.add(plank);
     let x = -w / 2 + 0.25;
     while (x < w / 2 - 0.3) {
-      if (Math.abs(x) < 1.25) { x = 1.25; continue; } // keep his silhouette clear
+      if (Math.abs(x) < 1.25) { x = 1.25; continue; } // keep her silhouette clear
       seed++;
       const kind = Math.floor(rand() * 4);
       let m: THREE.Mesh, width: number;
@@ -246,16 +264,18 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
   nose.position.set(0, -0.08, surfaceZ(0, -0.08) - 0.03);
   head.add(nose);
 
-  // Ears: flattened low-poly blobs.
+  // The bob, and gold hoops hanging below it.
+  head.add(new THREE.Mesh(hairGeometry(), skinMat));
+  const gold = new THREE.MeshStandardMaterial({ color: "#e0a93a", metalness: 0.6, roughness: 0.35, flatShading: true });
   for (const sx of [-1, 1]) {
-    const ear = new THREE.Mesh(paintFacets(new THREE.IcosahedronGeometry(0.2, 0), SKIN, SKIN_SHADE, 19), skinMat);
-    ear.scale.set(0.55, 1.1, 0.9);
-    ear.position.set(sx * 0.93, 0.02, -0.05);
-    head.add(ear);
+    const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.028, 4, 8), gold);
+    hoop.position.set(sx * 0.98, -0.6, 0.25);
+    hoop.rotation.y = sx * 1.1;
+    head.add(hoop);
   }
 
   // Eyes: a small eyeball with a big dark iris, set into the face, under a rounded lid that
-  // rotates down. Resting half-shut: he's not impressed.
+  // rotates down. Resting half-shut: she's not impressed.
   const eyeWhite = new THREE.MeshStandardMaterial({ color: "#f3ebe0", roughness: 0.45 });
   const irisMat = new THREE.MeshStandardMaterial({ color: "#21160f", roughness: 0.3 });
   const glintMat = new THREE.MeshBasicMaterial({ color: "#ffffff" });
@@ -276,18 +296,26 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
     // Upper lid: the top half of a slightly bigger sphere, pivoting at the eye's centre.
     const lid = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2), lidMat);
     lid.scale.set(1.15, 0.95, 1.05);
+    // Lashes ride the lid's edge, with a flick at the outer corner.
+    const lashMat = new THREE.MeshStandardMaterial({ color: "#140e0c", roughness: 0.6 });
+    const lash = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.03, 0.05), lashMat);
+    lash.position.set(0, 0.005, 0.16);
+    const flick = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.028, 0.04), lashMat);
+    flick.position.set(sx * 0.19, 0.035, 0.12);
+    flick.rotation.z = sx * 0.55;
+    lid.add(lash, flick);
     g.add(ball, iris, lid);
     head.add(g);
     return { g, iris, lid, sx };
   });
 
-  // Brows: chunky wedges, thick at the inner end. Mood rotates them (angry = inner ends down).
+  // Brows: slim and arched, peaking two thirds out. Mood rotates them (angry = inner ends down).
   const brows = [-1, 1].map((sx) => {
-    const geo = new THREE.BoxGeometry(0.46, 0.15, 0.16, 2, 1, 1);
+    const geo = new THREE.BoxGeometry(0.46, 0.075, 0.1, 4, 1, 1);
     const bp = geo.getAttribute("position");
     for (let i = 0; i < bp.count; i++) {
-      const out = bp.getX(i) * sx; // + toward the temple
-      if (out > 0) bp.setY(i, bp.getY(i) * 0.5 - 0.02);
+      const u = (bp.getX(i) * sx) / 0.23; // -1 inner .. 1 outer
+      bp.setY(i, bp.getY(i) * (u > 0.4 ? 0.6 : 1) + 0.05 * (1 - (u - 0.35) ** 2));
     }
     const m = new THREE.Mesh(paintFacets(geo, HAIR, new THREE.Color("#0e0b0a"), 23), darkMat);
     m.position.set(sx * 0.35, 0.4, surfaceZ(sx * 0.35, 0.4) + 0.02);
@@ -296,21 +324,24 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
     return { m, sx };
   });
 
-  const mustache = new THREE.Mesh(mustacheGeometry(), darkMat);
-  mustache.position.set(0, -0.36, surfaceZ(0, -0.36) + 0.02);
-  mustache.rotation.x = -0.15;
-  head.add(mustache);
+  const lipMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.55 });
+  const upperLip = new THREE.Mesh(lipGeometry(true), lipMat);
+  upperLip.position.set(0, -0.44, surfaceZ(0, -0.44) + 0.005);
+  const lowerLip = new THREE.Mesh(lipGeometry(false), lipMat);
+  const lowerRest = new THREE.Vector3(0, -0.47, surfaceZ(0, -0.47));
+  lowerLip.position.copy(lowerRest);
+  head.add(upperLip, lowerLip);
 
-  // Mouth: a rounded dark opening with a tongue, hidden behind the mustache until he talks.
+  // Mouth: a rounded dark opening with a tongue, between the lips while she talks.
   const mouth = new THREE.Group();
   const cavity = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.08, 8), new THREE.MeshStandardMaterial({ color: "#3b1310", roughness: 1 }));
   cavity.rotation.x = Math.PI / 2;
-  cavity.scale.set(1.25, 1, 0.55);
+  cavity.scale.set(1.0, 1, 0.55);
   const tongue = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: "#b54a43", flatShading: true, roughness: 0.7 }));
   tongue.scale.set(1.3, 0.5, 0.6);
   tongue.position.set(0, -0.075, 0.02);
   mouth.add(cavity, tongue);
-  mouth.position.set(0, -0.5, surfaceZ(0, -0.5) - 0.02);
+  mouth.position.set(0, -0.47, surfaceZ(0, -0.47) - 0.035);
   head.add(mouth);
 
   const hat = hatGroup();
@@ -332,7 +363,7 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
   const skin = (geo: THREE.BufferGeometry, seed: number) => facet(geo, "#e9a87c", "#b46b42", seed);
   const fists = [-1, 1].map((sx) => {
     const arm = new THREE.Group();
-    // Forearm runs from the elbow (back, by his side) to the wrist (front, on the counter).
+    // Forearm runs from the elbow (back, by her side) to the wrist (front, on the counter).
     const forearm = skin(new THREE.CylinderGeometry(0.2, 0.26, 1.1, 6), 73 + sx);
     forearm.rotation.x = Math.PI / 2;
     forearm.position.set(0, 0, -0.55);
@@ -414,7 +445,7 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
     const anger = Math.max(0, -mood) + (kickKind === "slam" ? k * 0.8 : 0);
     const joy = Math.max(0, mood);
     for (const b of brows) {
-      // Pleased = one brow cocked (his left goes up), not both raised in surprise.
+      // Pleased = one brow cocked (her left goes up), not both raised in surprise.
       const cock = b.sx > 0 ? joy : 0;
       b.m.rotation.z = b.sx * (0.42 * (anger + 0.25) * (1 - joy) - 0.15 * cock); // + = inner ends down
       b.m.position.y = 0.42 - 0.06 * anger + 0.1 * cock + talk * 0.03;
@@ -432,13 +463,16 @@ export function createKeeper(canvas: HTMLCanvasElement): Keeper {
       e.iris.position.y = look.y * 0.025;
     }
 
-    // Jaw: mouth opens with the voice, the mustache rides up a touch.
+    // Jaw: the lower lip drops with the voice and the mouth opens behind it. Pleased = a
+    // lopsided smirk (one corner up); cross = lips pressed thin.
     mouth.visible = talk > 0.04;
-    mouth.scale.set(0.8 + talk * 0.25, 0.25 + talk * 0.85, 1);
-    mouth.position.y = -0.5 - talk * 0.06;
-    mustache.position.y = -0.36 + talk * 0.02 + joy * 0.04; // cheeks lift in a grin
-    mustache.scale.x = 1 + joy * 0.08;
-    mustache.rotation.z = Math.sin(t * 11) * talk * 0.04;
+    mouth.scale.set(0.6 + talk * 0.25, 0.2 + talk * 0.75, 1);
+    mouth.position.y = -0.47 - talk * 0.05;
+    lowerLip.position.y = lowerRest.y - talk * 0.11;
+    const press = 1 - 0.25 * anger * (1 - talk);
+    upperLip.scale.set(1 + joy * 0.08, press, 1);
+    lowerLip.scale.set(1 + joy * 0.08, press, 1);
+    upperLip.rotation.z = lowerLip.rotation.z = joy * 0.07 + Math.sin(t * 11) * talk * 0.02;
 
     renderer.render(scene, camera);
     raf = requestAnimationFrame(frame);
