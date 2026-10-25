@@ -9,6 +9,7 @@ import { displayText, readIntent, speak, type Turn } from "@/lib/shopkeeper";
 import { allow, clientIp } from "@/lib/limits";
 import { VertexConfigError } from "@/lib/vertex";
 import { voiceToken } from "@/lib/voice";
+import { ConfigError } from "@/lib/config";
 
 interface Session {
   item: string;
@@ -47,7 +48,9 @@ export async function POST(req: NextRequest) {
       console.error("haggle: vertex config:", e.message);
       return unavailable();
     }
-    throw e;
+    console.error("haggle:", (e as Error).message);
+    // Always JSON, so the page can say what happened.
+    return NextResponse.json({ error: e instanceof ConfigError ? "not_set_up" : "generic" }, { status: e instanceof ConfigError ? 503 : 500 });
   }
 }
 

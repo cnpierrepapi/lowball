@@ -1,6 +1,7 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { base64urlnopad, hex } from "@scure/base";
 import type { Deal } from "./engine/negotiate";
+import { ConfigError } from "./config";
 
 // A signed offer is the only thing that can turn a haggle into a price on the payment route.
 // The engine decides the deal, the server signs it, and the item route trusts nothing else.
@@ -19,7 +20,7 @@ const dec = new TextDecoder();
 
 function secretKey(): Uint8Array {
   const k = process.env.OFFER_SIGNING_KEY;
-  if (!k || !/^[0-9a-f]{64}$/i.test(k)) throw new Error("OFFER_SIGNING_KEY must be 32 bytes of hex");
+  if (!k || !/^[0-9a-f]{64}$/i.test(k)) throw new ConfigError("OFFER_SIGNING_KEY must be 32 bytes of hex");
   return hex.decode(k.toLowerCase());
 }
 

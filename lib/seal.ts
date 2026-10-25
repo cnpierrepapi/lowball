@@ -1,5 +1,6 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { base64urlnopad, hex } from "@scure/base";
+import { ConfigError } from "./config";
 
 // Server-signed blobs for things the browser carries between requests (haggle state,
 // voice lines). The client can read them but can't change a byte without breaking the seal.
@@ -8,7 +9,7 @@ const dec = new TextDecoder();
 
 function key(): Uint8Array {
   const k = process.env.OFFER_SIGNING_KEY;
-  if (!k || !/^[0-9a-f]{64}$/i.test(k)) throw new Error("OFFER_SIGNING_KEY must be 32 bytes of hex");
+  if (!k || !/^[0-9a-f]{64}$/i.test(k)) throw new ConfigError("OFFER_SIGNING_KEY must be 32 bytes of hex");
   return hex.decode(k.toLowerCase());
 }
 

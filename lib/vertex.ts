@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { ConfigError } from "./config";
 
 // Gemini on Vertex over plain REST. In production a service account token is minted from
 // GOOGLE_VERTEX_CREDENTIALS_B64; locally we borrow the gcloud login.
@@ -8,7 +9,7 @@ const LOCATION = process.env.GOOGLE_VERTEX_LOCATION ?? "global";
 let cached: { token: string; until: number } | undefined;
 
 /** Credentials missing or refused. Not a hiccup: the shop can't think, so say so loudly. */
-export class VertexConfigError extends Error {}
+export class VertexConfigError extends ConfigError {}
 
 async function serviceAccountToken(b64: string): Promise<string> {
   const { GoogleAuth } = await import("google-auth-library");

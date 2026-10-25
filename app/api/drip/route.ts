@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { send, shopSigner, usdcAccount, usdcBalance } from "@/lib/chain";
 import { allow, clientIp } from "@/lib/limits";
 import { USDC_DEVNET } from "@/lib/x402";
+import { ConfigError } from "@/lib/config";
 
 // Test money for demo wallets, so a judge can buy without hunting for a devnet faucet.
 // The merchant is the tap: every sale refills it. Devnet only.
@@ -15,11 +16,11 @@ function merchantSigner(): Promise<KeyPairSigner> {
   tap ??= (() => {
     const raw = process.env.MERCHANT_KEYPAIR ??
       (process.env.NODE_ENV !== "production" ? readFileSync(".keys/merchant.json", "utf8") : undefined);
-    if (!raw) throw new Error("MERCHANT_KEYPAIR is not set");
+    if (!raw) throw new ConfigError("MERCHANT_KEYPAIR is not set");
     try {
       return createKeyPairSignerFromBytes(new Uint8Array(JSON.parse(raw)));
     } catch {
-      throw new Error("MERCHANT_KEYPAIR is not a JSON array of 64 bytes");
+      throw new ConfigError("MERCHANT_KEYPAIR is not a JSON array of 64 bytes");
     }
   })();
   return tap;
@@ -56,6 +57,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, amount: DRIP, tx });
   } catch (e) {
     console.error("drip:", (e as Error).message);
-    return NextResponse.json({ error: "chain_busy" }, { status: 503 });
+    return NextResponse.json({ error: e instanceof ConfigError ? "not_set_up" : "chain_busy" }, { status: 503 });
   }
 }

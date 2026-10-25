@@ -2,6 +2,7 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { x402ResourceServer } from "@x402/next";
 import { ExactSvmScheme } from "@x402/svm/exact/server";
 import { address } from "@solana/kit";
+import { ConfigError } from "./config";
 
 export const SOLANA_DEVNET = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1" as const;
 export const USDC_DEVNET = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -39,6 +40,6 @@ export const resourceServer = new x402ResourceServer(facilitator)
 
 export function merchantAddress(): string {
   const a = process.env.MERCHANT_ADDRESS;
-  if (!a) throw new Error("MERCHANT_ADDRESS is not set");
+  if (!a) throw new ConfigError("MERCHANT_ADDRESS is not set");
   return a;
 }

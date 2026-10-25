@@ -11,6 +11,7 @@ import {
   cancelPledgeIx, dealExists, fetchPledge, findPaymentByMemo, openPledgeIx, pledgeAddress, recordDealIx,
   recordReferralIx, releaseIx, send, shopSigner, usdcAccount, usdcBalance,
 } from "@/lib/chain";
+import { ConfigError } from "@/lib/config";
 
 // Offers being paid right now, so the same offer can't be paid twice at once on this instance.
 // Everything else about whether an offer was used is read from the chain.
@@ -134,6 +135,7 @@ export async function GET(req: NextRequest) {
     return await buy(req);
   } catch (e) {
     console.error("item route:", (e as Error).message);
+    if (e instanceof ConfigError) return NextResponse.json({ error: "not_set_up" }, { status: 503 });
     return NextResponse.json({ error: "chain_busy", retry: true }, { status: 503, headers: { "Retry-After": "3" } });
   }
 }

@@ -59,6 +59,7 @@ export const copy = {
     expired: "That handshake went cold. Haggle again.",
     payment_failed: "The payment didn't go through. Nothing was taken.",
     drip_limited: "That's all the free test money for now.",
+    not_set_up: "The shop isn't open yet. The owner forgot a key.",
     tap_dry: "The shop's out of test money. Grab devnet USDC at faucet.circle.com.",
     wallet_refused: "Your wallet said no. Try again, or take a demo wallet.",
     generic: "Something broke. Try again.",

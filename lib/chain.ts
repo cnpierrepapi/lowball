@@ -10,6 +10,7 @@ import { TOKEN_PROGRAM_ADDRESS, findAssociatedTokenPda } from "@solana-program/t
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { USDC_DEVNET } from "./x402";
+import { ConfigError } from "./config";
 
 // Thin client for the Lowball program, written against @solana/kit so the app doesn't pull in
 // Anchor. Layouts mirror anchor/programs/lowball/src/lib.rs; change both together.
@@ -72,13 +73,13 @@ export function shopSigner(): Promise<KeyPairSigner> {
   signer ??= (() => {
     const raw = process.env.SHOP_KEYPAIR ??
       (process.env.NODE_ENV !== "production" ? readFileSync(".keys/shop.json", "utf8") : undefined);
-    if (!raw) throw new Error("SHOP_KEYPAIR is not set");
+    if (!raw) throw new ConfigError("SHOP_KEYPAIR is not set");
     let bytes: Uint8Array;
     try {
       bytes = new Uint8Array(JSON.parse(raw));
     } catch {
       // Never pass the parse error on: it quotes the input, which is the secret key.
-      throw new Error("SHOP_KEYPAIR is not a JSON array of 64 bytes");
+      throw new ConfigError("SHOP_KEYPAIR is not a JSON array of 64 bytes");
     }
     return createKeyPairSignerFromBytes(bytes);
   })();
