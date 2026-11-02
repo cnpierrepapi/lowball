@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { createKeeper, type Keeper as Controller } from "./scene";
 
-/** The shopkeeper canvas. Hand back the controller so the page can drive mood and voice. */
+/** The shopkeeper canvas. Hand back the controller so the page can drive mood and talking. */
 export function Keeper({ onReady, className, portrait }: { onReady?: (k: Controller) => void; className?: string; portrait?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {

@@ -2,12 +2,12 @@ import { connection, NextResponse } from "next/server";
 import { address, getAddressDecoder } from "@solana/kit";
 import { offerPublicKey } from "@/lib/offer";
 import { merchantAddress } from "@/lib/x402";
-import { vertexReady } from "@/lib/vertex";
+import { claudeReady } from "@/lib/claude";
 import { PROGRAM_ID, rpc, shopAddress, shopSigner, usdcAccount, usdcBalance } from "@/lib/chain";
 
 // Everything the shop needs to take money, checked for real. Any failure is a 503, so a
 // misconfigured deploy shows up here instead of as a shopkeeper who never deals.
-// No model calls: the Vertex check only mints a token.
+// No model spend: the Claude check looks up a model, which is free, but proves the key works.
 
 async function check(fn: () => Promise<unknown> | unknown): Promise<true | string> {
   try {
@@ -47,7 +47,7 @@ export async function GET() {
       const usdc = await usdcBalance(await usdcAccount(address(merchantAddress())));
       if (usdc < 4_000_000) throw new Error(`demo-wallet tap low: ${usdc / 1e6} USDC`);
     }),
-    vertex: await check(() => vertexReady()),
+    claude: await check(() => claudeReady()),
   };
   const ok = Object.values(checks).every((c) => c === true);
   return NextResponse.json({ ok, checks }, { status: ok ? 200 : 503 });

@@ -1,8 +1,17 @@
-// Runs against the real Gemini models. Skipped unless LIVE_LLM=1.
+// Runs against the real Claude model. Skipped unless LIVE_LLM=1.
 import { describe, expect, it } from "vitest";
 import { SHELF } from "./catalog";
 import { openState, step } from "./engine/negotiate";
 import { allowedNumbers, lineIsHonest, lineIsSafe, readIntent, speak } from "./shopkeeper";
+
+// The key lives in .env.local, which vitest doesn't read on its own.
+if (process.env.LIVE_LLM) {
+  try {
+    process.loadEnvFile(".env.local");
+  } catch {
+    // no file: the key may already be in the environment
+  }
+}
 
 const book = SHELF.overlords;
 const live = describe.skipIf(!process.env.LIVE_LLM);

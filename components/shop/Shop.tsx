@@ -9,7 +9,7 @@ import type { Keeper as Controller } from "@/components/keeper/scene";
 import { copy } from "@/lib/copy";
 import { formatUsdc } from "@/lib/engine/money";
 import { createDemoWallet, loadDemoWallet, payingFetch, usdcOf } from "@/lib/client/wallet";
-import { createVoice, type Voice } from "@/lib/client/voice";
+import { createSounds, talkAlong, type Sounds } from "@/lib/client/sounds";
 import { connectWallet, subscribeWallets, walletsServerSnapshot, walletsSnapshot } from "@/lib/client/injected";
 import { decodePaymentResponseHeader } from "@x402/core/http";
 
@@ -32,7 +32,8 @@ const errorText = (code?: string) => copy.errors[code ?? ""] ?? copy.errors.gene
 
 export function Shop({ refNonce }: { refNonce?: string }) {
   const keeper = useRef<Controller | null>(null);
-  const voice = useRef<Voice | null>(null);
+  const sounds = useRef<Sounds | null>(null);
+  const stopTalk = useRef<(() => void) | null>(null);
 
   const [item, setItem] = useState<ItemInfo>();
   const [session, setSession] = useState<string>();
@@ -112,7 +113,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
     return () => { stop = true; clearInterval(id); };
   }, [result]);
 
-  function hear(j: { line: string; voice?: string; mood?: number; action?: string }) {
+  function hear(j: { line: string; mood?: number; action?: string }) {
     setMsgs((m) => [...m, { who: "keeper", text: j.line }]);
     if (typeof j.mood === "number") {
       setMood(j.mood);
@@ -122,12 +123,19 @@ export function Shop({ refNonce }: { refNonce?: string }) {
       : j.action === "deal" || j.action === "pledge_deal" ? "nod"
       : j.action === "counter" || j.action === "final_offer" ? "scoff" : undefined;
     if (reaction) keeper.current?.react(reaction);
-    if (j.voice) voice.current?.play(j.voice);
+    sounds.current?.play(
+      j.action === "walk_out" ? "door" : j.action === "raise" ? "slam"
+      : j.action === "deal" || j.action === "pledge_deal" ? "deal"
+      : j.action === "counter" || j.action === "final_offer" ? "scoff" : "line",
+    );
+    stopTalk.current?.();
+    stopTalk.current = talkAlong(j.line, (l) => keeper.current?.setTalk(l));
   }
 
   async function walkIn() {
-    voice.current ??= createVoice((l) => keeper.current?.setTalk(l));
-    voice.current.unlock();
+    sounds.current ??= createSounds();
+    sounds.current.unlock();
+    sounds.current.play("open");
     setBusy(true);
     setError(undefined);
     try {
@@ -220,6 +228,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
       history.replaceState(null, "", `?claim=${encodeURIComponent(j.claim)}`);
       const pr = r.headers.get("PAYMENT-RESPONSE");
       const tx = pr ? decodePaymentResponseHeader(pr).transaction : j.recovered;
+      sounds.current?.play("paid");
       if (j.status === "delivered") setResult({ kind: "delivered", title: j.title, claim: j.claim, tx });
       else setResult({ kind: "pledged", nonce: String(j.link).split("/").pop()!, required: j.referralsNeeded, claim: j.claim });
       keeper.current?.react("nod");
@@ -286,7 +295,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
           </div>
         )}
         <button
-          onClick={() => { setMuted(!muted); voice.current?.setMuted(!muted); }}
+          onClick={() => { setMuted(!muted); sounds.current?.setMuted(!muted); }}
           className="absolute bottom-4 right-4 rounded-full border-2 border-[#151311] bg-white px-3 py-1 text-sm font-bold"
         >
           {muted ? "Sound off" : "Sound on"}

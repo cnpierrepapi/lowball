@@ -1,13 +1,13 @@
 import * as THREE from "three";
 
 // The shopkeeper, built in code: faceted low-poly head, fedora, a dark bob, brows, eyes and lips
-// that all move with her mood and her voice. Flat shading plus a per-face colour jitter gives the
+// that all move with her mood and her talking. Flat shading plus a per-face colour jitter gives the
 // cut-paper look of the cover art. No model files.
 
 export interface Keeper {
   /** -1 furious .. 0 grumpy .. 1 pleased. Eases toward the target. */
   setMood(m: number): void;
-  /** 0 silent .. 1 shouting. Drive it from the voice's loudness. */
+  /** 0 silent .. 1 shouting. Driven while a line is on screen. */
   setTalk(level: number): void;
   /** Pointer in normalised screen coordinates, -1..1. */
   lookAt(x: number, y: number): void;
@@ -471,7 +471,7 @@ export function createKeeper(canvas: HTMLCanvasElement, { portrait = false } = {
       e.iris.position.y = look.y * 0.025;
     }
 
-    // Jaw: the lower lip drops with the voice and the mouth opens behind it. Pleased = a
+    // Jaw: the lower lip drops as she talks and the mouth opens behind it. Pleased = a
     // lopsided smirk (one corner up); cross = lips pressed thin.
     mouth.visible = talk > 0.04;
     mouth.scale.set(0.6 + talk * 0.25, 0.2 + talk * 0.75, 1);

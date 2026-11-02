@@ -3,7 +3,7 @@ import { base64urlnopad, hex } from "@scure/base";
 import { ConfigError } from "./config";
 
 // Server-signed blobs for things the browser carries between requests (haggle state,
-// voice lines). The client can read them but can't change a byte without breaking the seal.
+// claims). The client can read them but can't change a byte without breaking the seal.
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 

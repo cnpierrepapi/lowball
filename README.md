@@ -17,7 +17,7 @@ npm install
 npm test
 ```
 
-There's a second set that runs against the real Gemini models: fake system messages, "ignore your instructions", a fake closing tag, the grandma trick, negative prices. It checks that no deal goes under the floor, that the shopkeeper never says a number the engine didn't give her, and that she never says the floor out loud. It needs a Vertex login.
+There's a second set that runs against the real Claude model: fake system messages, "ignore your instructions", a fake closing tag, the grandma trick, negative prices. It checks that no deal goes under the floor, that the shopkeeper never says a number the engine didn't give her, and that she never says the floor out loud. It needs an Anthropic API key in `.env.local`.
 
 ```
 npm run test:live

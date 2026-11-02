@@ -9,5 +9,4 @@ add OFFER_SIGNING_KEY "$(grep '^OFFER_SIGNING_KEY=' .env.local | cut -d= -f2- | 
 add MERCHANT_ADDRESS "$(grep '^MERCHANT_ADDRESS=' .env.local | cut -d= -f2- | tr -d '\r\n')"
 add SHOP_KEYPAIR "$(tr -d '\r\n' < .keys/shop.json)"
 add MERCHANT_KEYPAIR "$(tr -d '\r\n' < .keys/merchant.json)"
-add GOOGLE_VERTEX_CREDENTIALS_B64 "$(tr -d '\r\n' < .keys/vertex.b64)"
-add GOOGLE_VERTEX_PROJECT "lowball-shop-102518510"
+add ANTHROPIC_API_KEY "$(grep '^ANTHROPIC_API_KEY=' .env.local | cut -d= -f2- | tr -d '\r\n')"

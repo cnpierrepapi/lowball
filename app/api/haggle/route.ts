@@ -7,8 +7,7 @@ import { signOffer } from "@/lib/offer";
 import { seal, unseal } from "@/lib/seal";
 import { displayText, readIntent, speak, type Turn } from "@/lib/shopkeeper";
 import { allow, clientIp } from "@/lib/limits";
-import { VertexConfigError } from "@/lib/vertex";
-import { voiceToken } from "@/lib/voice";
+import { ModelConfigError } from "@/lib/claude";
 import { ConfigError } from "@/lib/config";
 
 interface Session {
@@ -29,7 +28,7 @@ const MAX_TURNS = Number(process.env.HAGGLE_MAX_TURNS ?? 40);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function opening(name: string, list: number): string {
-  return `[sarcastic] Ah, a customer. "${name}". ${formatUsdc(list)} USDC, and before you ask, no, there's no price tag.`;
+  return `Ah, a customer. "${name}". ${formatUsdc(list)} USDC, and before you ask, no, there's no price tag.`;
 }
 
 const unavailable = () =>
@@ -44,8 +43,8 @@ export async function POST(req: NextRequest) {
     return await haggle(req);
   } catch (e) {
     // Missing or refused credentials: fail loudly instead of a shop that never deals.
-    if (e instanceof VertexConfigError) {
-      console.error("haggle: vertex config:", e.message);
+    if (e instanceof ModelConfigError) {
+      console.error("haggle: model config:", e.message);
       return unavailable();
     }
     console.error("haggle:", (e as Error).message);
@@ -67,7 +66,6 @@ async function haggle(req: NextRequest) {
     const session: Session = { item: item.id, state: openState(item), history: [{ who: "keeper", text: displayText(line) }], exp: now + SESSION_TTL, ref };
     return NextResponse.json({
       line: displayText(line),
-      voice: voiceToken(line, now),
       action: "open",
       ask: session.state.ask,
       // Public details only. The floor never leaves the server.
@@ -85,7 +83,7 @@ async function haggle(req: NextRequest) {
   if (turns > MAX_TURNS) return NextResponse.json({ error: "shop_closed", line: "We're closing. Come back tomorrow." }, { status: 429 });
 
   const intent = await readIntent(item, session.state.ask, session.history, message).catch((e) => {
-    if (e instanceof VertexConfigError) throw e;
+    if (e instanceof ModelConfigError) throw e;
     console.error("readIntent failed, treating as chat:", (e as Error).message);
     return { kind: "chat", tone: "neutral" } as const;
   });
@@ -105,7 +103,6 @@ async function haggle(req: NextRequest) {
 
   return NextResponse.json({
     line: displayText(line),
-    voice: voiceToken(line, now),
     action: decision.action,
     ask: decision.ask,
     mood: decision.mood,

@@ -51,7 +51,7 @@ function groups(words: string[]): number[] | null {
   return out;
 }
 
-/** Every amount or count said in words in `line` (voice tags ignored). */
+/** Every amount or count said in words in `line` (bracketed tags ignored). */
 export function spokenNumbers(line: string): Spoken[] {
   const t = line.toLowerCase().replace(/\[[^\]]*\]/g, " ").match(/[a-z]+|\d+(?:\.\d+)?/g) ?? [];
   const found: Spoken[] = [];
