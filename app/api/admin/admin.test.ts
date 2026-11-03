@@ -133,6 +133,23 @@ describe("the dashboard's actions", () => {
   });
 });
 
+describe("when something breaks", () => {
+  it("the dashboard gets the error as JSON, with where it happened, not a bare crash", async () => {
+    const cookie = await signIn();
+    setDb({ ...db, query: async () => { throw new Error("relation \"leads\" does not exist"); } });
+    try {
+      const r = await call(GET(req("GET", undefined, { cookie })));
+      expect(r.status).toBe(500);
+      expect(r.body).toEqual({ error: "server_error", where: "overview", detail: 'relation "leads" does not exist' });
+      const p = await call(POST(req("POST", { action: "settings", capUsd: 3 }, { cookie })));
+      expect(p.status).toBe(400); // actions already answered with their error message
+      expect(p.body.error).toContain("does not exist");
+    } finally {
+      setDb(db);
+    }
+  });
+});
+
 describe("the research cron", () => {
   it("turns away anyone without the secret", async () => {
     const r = await researchCron(new NextRequest("https://shop.test/api/cron/research", { headers: { authorization: "Bearer nope" } }));

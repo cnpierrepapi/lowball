@@ -34,6 +34,26 @@ function tomorrowAt18(): string {
   return t.toISOString().slice(0, 16);
 }
 
+// The server's answer, or a note of what came back if it wasn't JSON.
+async function readJson(r: Response): Promise<Record<string, unknown>> {
+  const text = await r.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: "not_json", detail: text.slice(0, 200) };
+  }
+}
+
+function problem(status: number, j: Record<string, unknown>): string {
+  return [`${status}`, j.error, j.where, j.detail].filter(Boolean).join(" · ");
+}
+
+async function getOverview(): Promise<Overview> {
+  const r = await fetch("/api/admin", { cache: "no-store" });
+  const j = await readJson(r);
+  return r.ok ? (j as unknown as Overview) : { passwordSet: true, signedIn: false, error: problem(r.status, j) };
+}
+
 export default function AdminPage() {
   const [o, setO] = useState<Overview>();
   const [busy, setBusy] = useState(false);
@@ -48,10 +68,10 @@ export default function AdminPage() {
     setO(j);
     if (j.research) setCap(String(j.research.capUsd));
   }, []);
-  const load = useCallback(async () => show(await (await fetch("/api/admin", { cache: "no-store" })).json()), [show]);
+  const load = useCallback(async () => show(await getOverview()), [show]);
   useEffect(() => {
     let live = true;
-    fetch("/api/admin", { cache: "no-store" }).then((r) => r.json()).then((j: Overview) => live && show(j));
+    getOverview().then((j) => live && show(j));
     return () => { live = false; };
   }, [show]);
 
@@ -60,8 +80,8 @@ export default function AdminPage() {
     setMsg(undefined);
     try {
       const r = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const j = await r.json();
-      if (!r.ok) setMsg(j.error === "wrong_password" ? a.wrong : j.error === "slow_down" ? copy.errors.slow_down : String(j.error));
+      const j = await readJson(r);
+      if (!r.ok) setMsg(j.error === "wrong_password" ? a.wrong : j.error === "slow_down" ? copy.errors.slow_down : problem(r.status, j));
       else {
         done?.(j);
         if (body.action !== "preview_drop") await load();
@@ -74,7 +94,7 @@ export default function AdminPage() {
   }
 
   if (!o) return <Shell><p className="font-mono text-sm">{copy.reader.loading}</p></Shell>;
-  if (o.error) return <Shell><p>{copy.errors[o.error] ?? copy.errors.generic}</p></Shell>;
+  if (o.error) return <Shell><p>{copy.errors[o.error] ?? o.error}</p></Shell>;
 
   if (!o.signedIn) {
     return (

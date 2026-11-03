@@ -52,7 +52,7 @@ export async function GET() {
     claude: await check(() => claudeReady()),
     // true or false only: an error from the database could carry connection details.
     database: (await dbReady()) || "unreachable",
-    tables: (await tablesReady(["games", "subscribers", "outbox", "mail_days"])) || "missing (did the build's migrate step run?)",
+    tables: (await tablesReady(["games", "subscribers", "outbox", "mail_days", "packs", "drops", "holds", "settings", "posts", "leads", "research_spend"])) || "missing (did the build's migrate step run?)",
     mail: await check(() => {
       const m = mailSettings();
       if (m.live && (!m.user || !m.password)) throw new Error("MAIL_LIVE=1 but the Zoho settings are missing");

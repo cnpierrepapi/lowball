@@ -20,11 +20,23 @@ export const maxDuration = 300;
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
+// Any failure comes back as JSON with its message, so the dashboard can show what went wrong
+// instead of a blank "something broke". Messages never include settings or keys.
+function failed(where: string, e: unknown) {
+  const message = e instanceof Error ? e.message : String(e);
+  console.error(`admin ${where}:`, message);
+  return json({ error: "server_error", where, detail: message.slice(0, 300) }, 500);
+}
+
 export async function GET(req: NextRequest) {
   const d = db();
   if (!d) return json({ error: "not_set_up" }, 503);
-  if (!isAdmin(req)) return json({ passwordSet: await passwordSet(), signedIn: false });
-  return json({ passwordSet: true, signedIn: true, ...(await overview()) });
+  try {
+    if (!isAdmin(req)) return json({ passwordSet: await passwordSet(), signedIn: false });
+    return json({ passwordSet: true, signedIn: true, ...(await overview()) });
+  } catch (e) {
+    return failed("overview", e);
+  }
 }
 
 async function overview() {
@@ -62,6 +74,14 @@ async function overview() {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    return await post(req);
+  } catch (e) {
+    return failed("action", e);
+  }
+}
+
+async function post(req: NextRequest) {
   const d = db();
   if (!d) return json({ error: "not_set_up" }, 503);
   // Forms posted from another site carry their own Origin; only ours gets in.
