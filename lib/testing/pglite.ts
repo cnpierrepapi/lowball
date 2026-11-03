@@ -21,5 +21,5 @@ export async function testDb(): Promise<Db & { pg: PGlite }> {
 
 /** Empties every table the app owns, so one database can serve a whole test file. */
 export async function wipe(d: Db): Promise<void> {
-  await d.query("TRUNCATE subscribers, outbox, mail_days, games RESTART IDENTITY CASCADE");
+  await d.query("TRUNCATE subscribers, outbox, mail_days, games, holds, drops, packs, settings RESTART IDENTITY CASCADE");
 }

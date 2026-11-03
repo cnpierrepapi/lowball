@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SHELF } from "@/lib/catalog";
+import { onSale } from "@/lib/shop/service";
 import { gameResult } from "@/lib/engine/games";
+import { liftAsk } from "@/lib/engine/drops";
 import { finishGame, startGame } from "@/lib/games/play";
 import { gameStore } from "@/lib/games/store";
 import { GAME_CLOCK } from "@/lib/games/replay";
@@ -52,9 +53,11 @@ async function game(req: NextRequest) {
   const scored = await finishGame(store, g.id, session.id, body.log);
   if (!scored.ok) return NextResponse.json({ error: scored.reason === "no_game" ? "no_game" : "game_rejected" }, { status: 410 });
 
-  const item = SHELF[session.item];
+  const sale = await onSale(session.item);
+  if (!sale) return NextResponse.json({ error: "no_game" }, { status: 410 });
+  const item = sale.item; // with the floor as it stands now
   const before = session.state.ask;
-  const { state, decision } = gameResult(item, session.state, scored.kind, scored.score);
+  const { state, decision } = gameResult(item, liftAsk(session.state, item.floor), scored.kind, scored.score);
   const line = await speak(item, decision, { kind: "chat", tone: "neutral" }, session.history, "", before);
   const history: Turn[] = [...session.history, { who: "keeper" as const, text: displayText(line) }].slice(-12);
   const next: Session = { ...session, state, history, game: undefined };

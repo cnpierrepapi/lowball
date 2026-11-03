@@ -137,6 +137,8 @@ export function step(item: Item, prev: State, intent: Intent): { state: State; d
     }
 
     case "referral": {
+      // Cash-only items (drops) have no friends deal: she keeps talking price.
+      if (item.maxReferrals < 1) return decide("hold");
       s.round += 1;
       const target = referralTarget(item, s.mood);
       if (intent.referrals === undefined) {

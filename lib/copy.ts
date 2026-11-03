@@ -75,6 +75,14 @@ export const copy = {
     unsubscribed: "Gone. Your email's out of my book.",
   },
 
+  drop: {
+    notOpen: (opensAt: string) => `Not open yet. Come back ${opensAt}.`,
+    left: (n: number, copies: number) => `${n} of ${copies} left.`,
+    soldOut: "Sold out. I don't restock.",
+    beatenToIt: "That one's gone. Someone beat you to it.",
+    closed: "Too late. That drop's closed.",
+  },
+
   referred: "A friend sent you. Haggle like they did, and your buy counts for them.",
 
   wallet: {

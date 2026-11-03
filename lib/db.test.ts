@@ -12,10 +12,10 @@ beforeEach(async () => { await wipe(db); });
 describe("migrations", () => {
   it("run each file once: a second run does nothing", async () => {
     const files = migrationFiles(new URL("../db", import.meta.url).pathname);
-    expect(files.map((f) => f.name)).toEqual(["001_games.sql", "002_mail.sql"]);
+    expect(files.map((f) => f.name)).toEqual(["001_games.sql", "002_mail.sql", "003_shop.sql"]);
     expect(await migrate(db, files)).toEqual([]);
     const ran = await db.query<{ name: string }>("SELECT name FROM schema_migrations ORDER BY name");
-    expect(ran.map((r) => r.name)).toEqual(["001_games.sql", "002_mail.sql"]);
+    expect(ran.map((r) => r.name)).toEqual(["001_games.sql", "002_mail.sql", "003_shop.sql"]);
   });
   it("split a file into statements and drop comments", () => {
     expect(statements("-- note\nCREATE TABLE a (x int); -- trailing\n\nCREATE INDEX b ON a (x);\n")).toEqual(["CREATE TABLE a (x int)", "CREATE INDEX b ON a (x)"]);

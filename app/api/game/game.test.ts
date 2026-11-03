@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 // The whole loop through the real routes: haggle until she gets bored, start the game, play it,
@@ -22,7 +22,21 @@ const { memoryStore, setGameStore } = await import("@/lib/games/store");
 const { snakeStart, snakeStep, SNAKE } = await import("@/lib/games/snake");
 const { stackStart, stackStep, slidingX, STACK } = await import("@/lib/games/stack");
 const { unseal } = await import("@/lib/seal");
-const { SHELF } = await import("@/lib/catalog");
+const { testDb, wipe } = await import("@/lib/testing/pglite");
+const { setDb } = await import("@/lib/db");
+const { shopStore } = await import("@/lib/shop/store");
+const { setPaidCheck } = await import("@/lib/shop/service");
+const { itemById } = await import("@/lib/catalog");
+
+// A pack with an open drop of 5 copies, in a real (in-memory) Postgres.
+const db = await testDb();
+setDb(db);
+setPaidCheck(async () => false);
+async function openPack() {
+  const shop = shopStore(db);
+  await shop.addPack({ id: "test-pack", title: "Test Pack", blurb: "A pack for tests.", teaser: "free", body: "paid", score: 50, leadId: null });
+  await shop.schedule({ packId: "test-pack", copies: 5, opensAt: new Date(Date.now() - 60_000), closesAt: new Date(Date.now() + 86_400_000) });
+}
 
 let t = 5_000_000;
 let store: ReturnType<typeof memoryStore>;
@@ -34,7 +48,7 @@ const post = (route: (r: NextRequest) => Promise<Response>, body: unknown) =>
 
 /** Haggles until she offers a game. Returns the session holding it. */
 async function untilBored() {
-  let r = await post(haggle, { item: "overlords" });
+  let r = await post(haggle, { item: "test-pack" });
   for (let i = 0; i < 8; i++) {
     r = await post(haggle, { session: r.j.session, message: "1 USDC?" });
     if (r.j.game) return r.j;
@@ -69,6 +83,11 @@ function play(kind: "snake" | "stack", seed: string) {
   return { log: { moves, end: s.tick }, ms: s.tick * STACK.tickMs };
 }
 
+beforeAll(async () => {
+  await wipe(db);
+  await openPack();
+});
+
 beforeEach(() => {
   store = memoryStore(() => t);
   setGameStore(store);
@@ -90,7 +109,7 @@ describe("games through the routes", () => {
     expect(done.status).toBe(200);
     expect(done.j.score).toBeGreaterThan(0);
     expect(done.j.ask).toBeLessThan(bored.ask);
-    expect(done.j.ask).toBeGreaterThanOrEqual(SHELF.overlords.floor);
+    expect(done.j.ask).toBeGreaterThanOrEqual((await itemById("test-pack"))!.floor);
 
     // Shaking on it now is a cash deal at the new price.
     const deal = await post(haggle, { session: done.j.session, message: "deal" });
@@ -145,7 +164,7 @@ describe("games through the routes", () => {
 
   it("with no store (production without a database), she never offers a game", async () => {
     setGameStore(null);
-    let r = await post(haggle, { item: "overlords" });
+    let r = await post(haggle, { item: "test-pack" });
     for (let i = 0; i < 7; i++) {
       r = await post(haggle, { session: r.j.session, message: "1 USDC?" });
       expect(r.j.game).toBeUndefined();
@@ -154,7 +173,7 @@ describe("games through the routes", () => {
 
   it("if the database fails while offering, the haggle carries on without a game", async () => {
     setGameStore({ ...store, offer: async () => { throw new Error("db down"); } });
-    let r = await post(haggle, { item: "overlords" });
+    let r = await post(haggle, { item: "test-pack" });
     for (let i = 0; i < 7; i++) {
       r = await post(haggle, { session: r.j.session, message: "1 USDC?" });
       expect(r.status).toBe(200);
