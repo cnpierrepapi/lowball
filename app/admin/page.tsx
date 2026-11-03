@@ -18,7 +18,7 @@ interface Overview {
   drops?: Drop[];
   mail?: { confirmed: number; unconfirmed: number; sentToday: number; cap: number; waiting: number; live: boolean; liveFromServer: boolean };
   research?: { spent: number; capUsd: number; autoDrop: boolean; leads: LeadRow[] };
-  intents?: { keySet: boolean; shopUsdc: boolean | "unknown"; payments: { nonce: string; item: string; price: string; status: string; amount_in_text: string; receipt_written: boolean }[] };
+  intents?: { keySet: boolean; shopAddress: string | null; shopUsdc: boolean | "unknown"; payments: { nonce: string; item: string; price: string; status: string; amount_in_text: string; receipt_written: boolean }[] };
   error?: string;
 }
 
@@ -211,6 +211,17 @@ export default function AdminPage() {
         <section className={`${box} mt-4`}>
           <h2 className="font-display text-xl font-extrabold">{a.intents}</h2>
           <p className="text-sm">{o.intents.keySet ? a.intentsKeySet : a.intentsKeyMissing}</p>
+          {o.intents.shopAddress ? (
+            <div className="mt-1 text-sm">
+              <p>{a.shopAddress}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <code className="break-all font-mono text-xs">{o.intents.shopAddress}</code>
+                <button onClick={() => navigator.clipboard.writeText(o.intents!.shopAddress!)} className={btnLine}>{a.copyAddress}</button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm">{a.shopAddressMissing}</p>
+          )}
           <p className="text-sm">{a.shopUsdc(o.intents.shopUsdc)}</p>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
             <label className="flex min-w-0 flex-1 flex-col">{a.intentsKey}

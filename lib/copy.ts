@@ -197,6 +197,9 @@ export const copy = {
     intentsKey: "Aurora Intents API key (from studio.aurora.dev; it isn't secret)",
     intentsKeySet: "Key saved. Buyers see the button.",
     intentsKeyMissing: "No key yet: the button stays hidden.",
+    shopAddress: "Her wallet (Solana; Aurora pays the USDC here, on mainnet):",
+    shopAddressMissing: "Her wallet address isn't set on the server.",
+    copyAddress: "Copy",
     shopUsdc: (v: boolean | "unknown") =>
       v === true ? "The shop has a USDC account on Solana mainnet." : v === false ? "The shop has no USDC account on Solana mainnet yet: create one before taking real payments." : "Couldn't check the shop's mainnet USDC account.",
   },
