@@ -26,7 +26,7 @@ export function terms(text: string): string[] {
   const out = new Set<string>();
   for (let w of words) {
     w = w.replace(/[.-]+$/, "");
-    if (w.length < 3 || STOP.has(w)) continue;
+    if (w.length < 3 || w.length > 24 || STOP.has(w)) continue; // over 24: addresses, hashes, CamelCase names
     if (w.length > 4 && w.endsWith("s") && !w.endsWith("ss")) w = w.slice(0, -1);
     out.add(w);
   }
@@ -54,7 +54,19 @@ export function cluster(posts: Post[], minShared = 3, minJ = 0.2): Cluster[] {
   const groups: { posts: Post[]; sets: Set<string>[] }[] = [];
   for (const p of sorted) {
     const set = new Set(terms(`${p.title} ${p.excerpt}`));
-    const home = groups.find((g) => g.sets.some((s) => { const r = jaccard(set, s); return r.shared >= minShared && r.j >= minJ; }));
+    // Two chain findings never group together: each program's failure is its own lead (their
+    // shared wording, "transactions fail with", would otherwise glue them into one).
+    // Joins a group when it shares 3 words and a fifth of its words with a post there, or (for long
+    // posts, where a fifth is a lot) 4 words with one of them in both titles.
+    const titleSet = new Set(terms(p.title));
+    const home = groups.find(
+      (g) => !(p.source === "chain" && g.posts.some((q) => q.source === "chain")) &&
+        g.sets.some((s, i) => {
+          const r = jaccard(set, s);
+          if (r.shared >= minShared && r.j >= minJ) return true;
+          return r.shared >= minShared + 1 && terms(g.posts[i].title).some((t) => titleSet.has(t) && s.has(t) && set.has(t));
+        }),
+    );
     if (home) {
       home.posts.push(p);
       home.sets.push(set);
@@ -76,11 +88,27 @@ export function cluster(posts: Post[], minShared = 3, minJ = 0.2): Cluster[] {
   });
 }
 
+/** The pain phrases a set of posts uses. */
+export function painIn(posts: Pick<Post, "title" | "excerpt" | "source">[]): string[] {
+  const text = posts.filter((p) => p.source !== "chain").map((p) => `${p.title} ${p.excerpt}`).join(" ").toLowerCase();
+  return PAIN_WORDS.filter((w) => text.includes(w));
+}
+
+/**
+ * Someone asking, not announcing: a question, or a post using a pain phrase. The cross-check
+ * only counts these (a "Show HN" sharing three words with a lead isn't the same need).
+ */
+export function isAsking(p: Pick<Post, "title" | "excerpt" | "source">): boolean {
+  if (p.source === "stackoverflow") return true; // every Stack Exchange post is a question
+  if (/^\s*(show hn|launch hn)\b/i.test(p.title)) return false;
+  return /\?/.test(p.title) || painIn([p]).length > 0;
+}
+
 /** Phrases that mean it hurts. Each distinct one found counts once. */
 export const PAIN_WORDS = [
   "wish there was", "is there a tool", "someone should build", "would pay", "why is there no", "frustrat", "painful",
   "waste", "hours", "tedious", "nightmare", "annoying", "hate", "broken", "manually", "by hand", "every time", "no way to",
-  "can't find", "cannot find", "doesn't exist", "workaround",
+  "can't find", "cannot find", "doesn't exist", "workaround", "fails", "failing", "keeps failing", "stuck", "lost",
 ];
 
 // Lowered on 3 Nov (owner's call): a real week of posts topped out at 31, so 60 was never reached.
@@ -112,8 +140,7 @@ export function partialScore(c: Cluster, now: Date) {
   const platforms = new Set(c.posts.map((p) => p.source)).size;
   const repos = new Set(c.posts.filter((p) => p.repo).map((p) => p.repo)).size;
   const engagement = c.posts.reduce((n, p) => n + Math.max(0, p.engagement), 0);
-  const text = c.posts.map((p) => `${p.title} ${p.excerpt}`).join(" ").toLowerCase();
-  const painFound = PAIN_WORDS.filter((w) => text.includes(w));
+  const painFound = painIn(c.posts);
   return {
     velocity: { points: pts(recent / 3), inputs: { postsLast48h: recent }, rule: "20 × min(1, posts in the last 48 hours ÷ 3)" },
     sources: {

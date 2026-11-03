@@ -6,7 +6,8 @@ Every time `main` goes live, the code gets a tag, so there's always a named poin
 |---|---|
 | `v1.0` | The site before phase 2: the ebook, haggling, pay in friends. Commit `ffce661`. |
 | `v2.0` | Phase 2: games, drop emails, build packs and drops, the research loop, the notebook, the back office. Merge commit `79fd64b`, live since 3 Nov 2026. |
-| `v2.1` | Six research sources, the cross-check, "seen in 2 places" before any spend, thresholds 25 / 40. |
+| `v2.1` | Six research sources, the cross-check, "seen in 2 places" before any spend, thresholds 25 / 40. Merge commit `aaf2fa4`, live since 3 Nov 2026. |
+| `v2.2` | Research moves to Solana developer tools: Solana Stack Exchange, the Solana forum, the chain itself; four fixes (same owner, bots, someone asking, someone said it hurts, novelty checked before spend); "seen twice" by 2 people or 2 sites. |
 
 The tags exist in the local repo, but the cloud session that made the release couldn't push tags.
 To put them on GitHub: Releases, "Draft a new release", type the tag name, pick the commit above

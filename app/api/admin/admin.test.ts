@@ -163,8 +163,8 @@ describe("the research cron", () => {
       const r = await researchCron(new NextRequest("https://shop.test/api/cron/research", { headers: { authorization: `Bearer ${"s".repeat(40)}` } }));
       expect(r.status).toBe(200);
       const j = await r.json();
-      // Every source down: 5 HN + 5 GitHub + 4 Stack Exchange + Reddit + dev.to + Lobsters.
-      expect(j.watched.errors.length).toBe(17);
+      // Every source down: 5 HN + 5 GitHub + 2 Stack Exchange + forum + Reddit + dev.to + 8 chain programs.
+      expect(j.watched.errors.length).toBe(23);
       expect(j.investigated).toBeUndefined();
     } finally {
       globalThis.fetch = realFetch;

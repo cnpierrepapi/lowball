@@ -610,3 +610,108 @@ New in `lib/research/research.test.ts`:
 - no cross-checks for off-mission leads, or for sites already seen.
 
 Each rule was deleted in turn to check a test fails.
+
+## The move to Solana developer tools, the chain as a source, and four fixes (3 Nov, later)
+
+### Why
+The first paid investigation spent $0.32 and correctly skipped its lead. But that lead shouldn't
+have reached the paid step:
+- It was two task tickets by an AI agent account, in two repos owned by one person.
+- Its "second site" was a Show HN that shared three words with it.
+- Nobody in it said anything hurt (pain score 0).
+- Its novelty was the placeholder 10, never actually checked.
+
+At the same time the owner moved the mission to crypto: the buyers already hold USDC on Solana,
+and the chain itself can be read.
+
+### The four fixes
+1. **Same owner is one project, and bots are dropped.** Issues from one GitHub account or
+   organisation count as one project's to-do list, which is never investigated. Posts from bot
+   or agent accounts (names ending in `[bot]`, `-bot` or `-ai`, and dependabot, renovate,
+   github-actions) are dropped as they're read.
+2. **A cross-check match must be someone asking.** On top of the 3 shared words, the post must be
+   a question or use a pain phrase. "Show HN" and "Launch HN" never count.
+3. **A new check, "Someone said it hurts".** At least one post must use a pain phrase. A chain
+   number alone never counts.
+4. **Novelty is checked for real before spending.** If a lead's repo count is still the
+   placeholder, she does the free lookup first and rescores. If the score drops below the bar, she
+   stops. If GitHub doesn't answer, she stops and leaves the lead as it was.
+
+### The new sources (all tested live on 3 Nov)
+
+| Source | What she reads |
+|---|---|
+| Solana Stack Exchange, and Stack Overflow's `solana` tag | Every recent question (it's a few a week). |
+| The Solana forum | Its public Discourse search (very quiet: one post a month). |
+| Hacker News and GitHub | The pain phrases, plus the word "solana". |
+| Reddit | r/solana, r/solanadev and r/CryptoTechnology. Best effort: it refuses Vercel. |
+| dev.to | The `solana` tag. |
+| **The chain** | Solana mainnet, through a public RPC. |
+
+Lobsters was dropped, because it carries no crypto.
+
+**The chain, in practice:**
+- Once a run, for 8 popular programs (Jupiter, Raydium AMM and CLMM, Orca, Meteora, Pump.fun,
+  Marinade, Metaplex; every address checked to be a deployed program), she reads their last
+  1,000 transactions and counts the failures by error.
+- If the most common error is at least 10% of a program's transactions, that becomes a finding
+  in plain words, for example "54% of recent Jupiter v6 transactions fail with slippage tolerance
+  exceeded".
+- The error's name comes from the program's own logs where it gives one; otherwise it's shown
+  by number. The only name written into the code is Jupiter's 6001.
+- Calls are spaced out. A "slow down" (429) gets 3 tries, after 1, 2 and 4 seconds. If the RPC
+  still says no, she skips the chain that day and notes it.
+- Chain findings never group with each other, and never count as pain or as people.
+
+**The window is now 30 days** instead of 7, because these sources are quiet.
+
+### The owner's call: "seen twice"
+Live, nothing showed up on 2 different sites. So "seen twice" now passes with 2 sites **or** 2
+different people on the same site. Chain findings aren't people.
+
+### Grouping long posts
+Two Stack Exchange questions about the same need (getting tokens out of a protocol whose
+website has died) shared 4 key words but didn't group: they're long, and the old rule also needed
+a fifth of all their words to overlap. A post now also joins a group when it shares 4 key words,
+one of them in both titles.
+
+### Live run (3 Nov, no model)
+- **Read:** GitHub 9, Stack Exchange 12, forum 1, chain 5, Hacker News 0, Reddit 0 (throttled).
+- **Leads:** 27.
+- **Passing every check:** the "dead frontend" lead: two people on Solana Stack Exchange, both
+  stuck getting tokens out after a protocol's website went away. It scores 28 (WATCH), so it can be
+  investigated by hand.
+- **Not passing:** the chain findings (Jupiter slippage at 54%, Pump.fun at 54%) score high, but
+  nobody on another site complained about them in those words, so they stay unpaid. That's by
+  design.
+- **One of the two askers is named "SolBotRescue".** The name suggests it may be an automated
+  "rescue" account. The bot filter doesn't catch it, so the notebook shows both askers and the
+  owner can judge.
+
+### Bugs hit, and the fixes
+1. **Chain findings glued together.** Their shared wording ("transactions fail with") grouped 5
+   programs into one lead. Fix: chain findings never group with each other.
+2. **The cross-check searched with junk.** For chain leads, the program address and CamelCase
+   error names ranked as "rare words". Fix: findings are written in plain words with the address
+   left out, and words over 24 characters are ignored.
+3. **Newer transactions failed to load.** The RPC answered "Transaction version (1) is not
+   supported". Fix: the request now asks for version 1. RPC errors in an answer are raised, not
+   swallowed (tested).
+4. **Four new rules had no test that caught them** on the first deletion pass: the pain check, a
+   Stack Exchange site mistaken for a GitHub owner, "someone asking" in the cross-check, and
+   stopping when the real novelty count sinks the score. Fix: a test for each, then the pass again
+   (all caught).
+
+### Tests
+`lib/research/research.test.ts` now covers:
+- every new source reader (Stack Exchange, forum, dev.to);
+- the bot filter, while reading and in the cross-check;
+- the chain: counting, naming, the 10% bar, the 429 backoff and its limit, RPC errors, and
+  findings that never group or count as pain;
+- the Solana mission check, same owner, "someone said it hurts" and "someone asking";
+- seen twice by 2 people or 2 sites;
+- the long-post grouping rule, using the dead-frontend pair;
+- the real novelty check before spending, both when it sinks the score and when GitHub doesn't
+  answer.
+
+Each rule was deleted in turn to check a test fails.

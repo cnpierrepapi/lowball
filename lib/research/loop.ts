@@ -4,11 +4,12 @@ import { mailStore } from "../mail/store";
 import { announceDrop } from "../mail/outbox";
 import type { Mailer } from "../mail/mailer";
 import {
-  countRepos, PAIN_QUERIES, readDevto, readLobsters, SE_QUERIES, SE_SITES, searchGitHub, searchHN, searchReddit,
-  searchRedditWords, searchStackExchange, SOURCES, type Fetch, type Post, type Source,
+  countRepos, isBot, MISSION, PAIN_QUERIES, readDevto, readSolanaForum, recentQuestions, SE_CROSS_SITES, SE_FEEDS, searchGitHub,
+  searchHN, searchReddit, searchRedditWords, searchSolanaForum, searchStackExchange, SOURCES, type Fetch, type Post, type Source,
 } from "./sources";
-import { cluster, fullScore, places, sharedTerms, worthNoveltyCheck, type Cluster } from "./score";
-import { checks, notInvestigated, onMission, seenTwice, underCap, type Checks } from "./coordinator";
+import { readChain, type Sleep } from "./chain";
+import { cluster, fullScore, isAsking, painIn, places, sharedTerms, worthNoveltyCheck, type Cluster } from "./score";
+import { checks, hurts, notInvestigated, onMission, seenTwice, underCap, type Checks } from "./coordinator";
 import { ResearchRefused, type ResearchModel } from "./model";
 import { assemblePack } from "./pack";
 import { researchStore, type Lead } from "./store";
@@ -26,11 +27,12 @@ export interface Deps {
   mailer?: Mailer;
   mailCap?: number;
   site?: string;
+  sleep?: Sleep; // the chain reader's pauses; tests make them instant
 }
 
 const DAY = 86_400_000;
-/** How far back posts count toward a lead. */
-export const WINDOW_DAYS = 14;
+/** How far back posts count toward a lead, and how far back the watch reads (Solana sources are quiet). */
+export const WINDOW_DAYS = 30;
 // GitHub allows 10 searches a minute without a key: 5 phrase searches + 3 repo counts + 2
 // cross-checks. Reddit throttles hard, so it gets 1 watch query and 2 cross-checks a run.
 /** At most this many free GitHub repo lookups (novelty) per watch. */
@@ -71,13 +73,14 @@ export async function watch(d: Deps): Promise<WatchResult> {
   const now = (d.now ?? (() => new Date()))();
   const f = d.fetch ?? fetch;
   const store = researchStore(d.db);
-  const since = new Date(now.getTime() - 7 * DAY);
+  const since = new Date(now.getTime() - WINDOW_DAYS * DAY);
   const found: Post[] = [];
   const errors: string[] = [];
   const fetched = Object.fromEntries(SOURCES.map((s) => [s, 0])) as Record<Source, number>;
   const gather = async (source: Source, label: string, run: () => Promise<Post[]>) => {
     try {
-      const posts = await run();
+      // Bots and AI agents filing tickets aren't people with a problem.
+      const posts = (await run()).filter((p) => !isBot(p.author));
       fetched[source] += posts.length;
       found.push(...posts);
     } catch (e) {
@@ -85,13 +88,17 @@ export async function watch(d: Deps): Promise<WatchResult> {
     }
   };
   for (const q of PAIN_QUERIES) {
-    await gather("hn", `hn "${q}"`, () => searchHN(q, since, f));
-    await gather("github", `github "${q}"`, () => searchGitHub(q, since, f));
+    await gather("hn", `hn "${q}"`, () => searchHN(q, since, f, true, MISSION));
+    await gather("github", `github "${q}"`, () => searchGitHub(q, since, f, true, MISSION));
   }
-  for (const q of SE_QUERIES) for (const site of SE_SITES) await gather("stackoverflow", `${site} "${q}"`, () => searchStackExchange(q, since, site, f));
+  for (const [site, tag] of SE_FEEDS) await gather("stackoverflow", `${site}${tag ? ` [${tag}]` : ""}`, () => recentQuestions(site, since, tag, f));
+  await gather("forum", "solana forum", () => readSolanaForum(new Date(now.getTime() - 30 * DAY), f));
   await gather("reddit", "reddit", () => searchReddit(PAIN_QUERIES, since, f));
   await gather("devto", "dev.to", () => readDevto(PAIN_QUERIES, since, f));
-  await gather("lobsters", "lobsters", () => readLobsters(PAIN_QUERIES, since, f));
+  const chain = await readChain(now, f, d.sleep);
+  fetched.chain += chain.posts.length;
+  found.push(...chain.posts);
+  errors.push(...chain.errors);
   await store.savePosts(found, now);
 
   // Group, and bring along what earlier cross-checks attached to each lead.
@@ -106,10 +113,9 @@ export async function watch(d: Deps): Promise<WatchResult> {
     return { ...c, posts: [...c.posts, ...extra] };
   };
 
-  // Cross-check the best leads on the sites they haven't turned up on yet.
+  // Cross-check the best leads on the sites they haven't turned up on yet. Only leads that could
+  // ever be investigated are worth the searches: on mission, and not one project's to-do list.
   const budget = { github: CROSSREF_GITHUB, reddit: CROSSREF_REDDIT };
-  // Only leads that could ever be investigated are worth the searches: on mission, and not one
-  // project's feature request (most GitHub hits are exactly that).
   const eligible = clusters.filter((c) => {
     const posts = withCross(c).posts;
     return onMission(posts.map((p) => `${p.title} ${p.excerpt}`).join(" "), posts.filter((p) => p.repo).map((p) => p.repo!), posts.length).ok;
@@ -134,7 +140,8 @@ export async function watch(d: Deps): Promise<WatchResult> {
       }
     };
     await look("hn", () => searchHN(words, since30, f, false));
-    await look("stackoverflow", () => searchStackExchange(words, since30, "stackoverflow", f, null));
+    await look("stackoverflow", async () => (await Promise.all(SE_CROSS_SITES.map((site) => searchStackExchange(words, since30, site, f)))).flat());
+    await look("forum", () => searchSolanaForum(words, since30, f));
     if (budget.github > 0 && !have.has("github")) {
       budget.github--;
       await look("github", () => searchGitHub(words, since30, f, false));
@@ -143,8 +150,16 @@ export async function watch(d: Deps): Promise<WatchResult> {
       budget.reddit--;
       await look("reddit", () => searchRedditWords(words, since30, f));
     }
+    // A match must share 3 of the lead's words AND be someone asking (a question or a complaint),
+    // not an announcement or a bot.
     const known = new Set(lead.posts.map((p) => p.id));
-    const keep = [...new Map(hits.filter((p) => !known.has(p.id) && sharedTerms(p, c.terms) >= CROSSREF_MIN_SHARED).map((p) => [p.id, p])).values()];
+    const keep = [
+      ...new Map(
+        hits
+          .filter((p) => !known.has(p.id) && !isBot(p.author) && isAsking(p) && sharedTerms(p, c.terms) >= CROSSREF_MIN_SHARED)
+          .map((p) => [p.id, p]),
+      ).values(),
+    ];
     if (keep.length) {
       await store.savePosts(keep, now, "crossref");
       attached.set(c.id, [...(attached.get(c.id) ?? []), ...keep]);
@@ -194,7 +209,8 @@ export async function coordinate(d: Deps, lead: Lead, step: "investigate" | "wri
   const done = step === "investigate" ? await store.investigatedSince(new Date(now.getTime() - 30 * DAY)) : [];
   const c = checks({
     onMission: onMission(text, repos, posts.length),
-    seenTwice: seenTwice(places(posts)),
+    hurts: hurts(painIn(posts)),
+    seenTwice: seenTwice(places(posts), new Set(posts.filter((p) => p.source !== "chain").map((p) => `${p.source}:${p.author}`)).size),
     notInvestigated: step === "investigate" ? notInvestigated(lead.terms, done, lead.id) : { ok: true, why: "investigated, ready to write" },
     underCap: underCap(await store.spentThisMonth(now), capUsd, step),
   });
@@ -217,6 +233,22 @@ export async function investigate(d: Deps, leadId: string, opts: { force?: boole
   if (!lead) return { ok: false, reason: "no such lead" };
   if (lead.status !== "new") return { ok: false, reason: `lead is already ${lead.status}` };
   if (lead.verdict === "IGNORE" || (lead.verdict === "WATCH" && !opts.force)) return { ok: false, reason: `score ${lead.total} is ${lead.verdict}` };
+  // Novelty counted as a placeholder 10 until checked. Before any money, check it for real
+  // (a free GitHub lookup) and rescore; if that drops it below the bar, stop here.
+  if (lead.score.novelty.inputs.reposFound === null) {
+    const all = await leadPosts(d, lead);
+    let repos: number | null = null;
+    try {
+      repos = await countRepos(lead.terms, d.fetch ?? fetch);
+    } catch {
+      return { ok: false, reason: "couldn't check whether it's been built (GitHub didn't answer); try again later" };
+    }
+    const score = fullScore({ id: lead.id, posts: all, terms: lead.terms }, now, repos);
+    await store.upsertLead({ id: lead.id, title: lead.title, terms: lead.terms, postIds: lead.postIds, crossIds: lead.crossIds, score }, now);
+    if (score.verdict === "IGNORE" || (score.verdict === "WATCH" && !opts.force)) {
+      return { ok: false, reason: `with novelty checked (${repos} similar repos) the score is ${score.total}, ${score.verdict}` };
+    }
+  }
   const c = await coordinate(d, lead, "investigate", Boolean(opts.force) && lead.verdict !== "INVESTIGATE");
   if (!c.pass) return { ok: false, reason: "a coordinator check failed", checks: c };
   if (!d.model) return { ok: false, reason: "no model" };
