@@ -5,7 +5,11 @@ Every time `main` goes live, the code gets a tag, so there's always a named poin
 | Tag | What it is |
 |---|---|
 | `v1.0` | The site before phase 2: the ebook, haggling, pay in friends. Commit `ffce661`. |
-| `v2.0` | Phase 2: games, drop emails, build packs and drops, the research loop, the notebook, the back office. |
+| `v2.0` | Phase 2: games, drop emails, build packs and drops, the research loop, the notebook, the back office. Merge commit `79fd64b`, live since 3 Nov 2026. |
+
+The tags exist in the local repo, but the cloud session that made the release couldn't push tags.
+To put them on GitHub: Releases, "Draft a new release", type the tag name, pick the commit above
+as the target, and publish.
 
 ## If something breaks on the live site
 
