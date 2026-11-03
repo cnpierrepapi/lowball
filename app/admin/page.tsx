@@ -18,6 +18,7 @@ interface Overview {
   drops?: Drop[];
   mail?: { confirmed: number; unconfirmed: number; sentToday: number; cap: number; waiting: number; live: boolean; liveFromServer: boolean };
   research?: { spent: number; capUsd: number; autoDrop: boolean; leads: LeadRow[] };
+  intents?: { keySet: boolean; shopUsdc: boolean | "unknown"; payments: { nonce: string; item: string; price: string; status: string; amount_in_text: string; receipt_written: boolean }[] };
   error?: string;
 }
 
@@ -63,6 +64,7 @@ export default function AdminPage() {
   const [form, setForm] = useState({ packId: "", copies: 5, opensAt: "", hoursOpen: 48 });
   const [preview, setPreview] = useState<{ text: string; subject: string; recipients: number }>();
   const [cap, setCap] = useState("");
+  const [intentsKey, setIntentsKey] = useState("");
 
   const show = useCallback((j: Overview) => {
     setO(j);
@@ -202,6 +204,27 @@ export default function AdminPage() {
             </label>
           )}
           <button disabled={busy || o.mail.waiting === 0} onClick={() => act({ action: "send_mail" })} className={`${btnLine} mt-2`}>{a.sendNow}</button>
+        </section>
+      )}
+
+      {o.intents && (
+        <section className={`${box} mt-4`}>
+          <h2 className="font-display text-xl font-extrabold">{a.intents}</h2>
+          <p className="text-sm">{o.intents.keySet ? a.intentsKeySet : a.intentsKeyMissing}</p>
+          <p className="text-sm">{a.shopUsdc(o.intents.shopUsdc)}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            <label className="flex min-w-0 flex-1 flex-col">{a.intentsKey}
+              <input value={intentsKey} onChange={(e) => setIntentsKey(e.target.value)} className={field} autoComplete="off" />
+            </label>
+            <button disabled={busy || !intentsKey.trim()} onClick={() => act({ action: "settings", intentsApiKey: intentsKey.trim() }, () => setIntentsKey(""))} className={btnLine}>{a.save}</button>
+          </div>
+          {o.intents.payments.length > 0 && (
+            <ul className="mt-2 flex flex-col gap-1 font-mono text-xs">
+              {o.intents.payments.map((x) => (
+                <li key={x.nonce}>{x.item} · {(Number(x.price) / 1e6).toFixed(2)} USDC · {x.amount_in_text} · {x.status}{x.receipt_written ? " · receipt" : ""}</li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 

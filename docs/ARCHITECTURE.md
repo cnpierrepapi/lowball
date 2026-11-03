@@ -41,6 +41,7 @@ For each feature in plain words, with what could break it and the bugs hit, see
 | `POST /api/haggle` | One turn: label the message, step the engine, maybe offer a game, hold a copy at a handshake, say her line, sign the offer. |
 | `POST /api/game` | `start` (reveals the seed, starts the clock) and `finish` (replays the moves, scores, moves the price). |
 | `GET /api/item/[id]` | x402 payment for a signed offer, then the onchain receipt. |
+| `GET`, `POST /api/intents` | Paying a signed cash offer with any crypto through Aurora Intents (real money, mainnet): the token list, `start` (a deposit address for the exact price), `status`. |
 | `/api/pledge/[nonce]`, `/topup` | Friends deals: status, refund, top-up. |
 | `/api/claim`, `/api/read`, `/api/preview/[id]` | Getting back to a purchase, reading it, and the free part. |
 | `/api/mail/signup`, `confirm`, `unsubscribe` | Drop emails. |
@@ -74,6 +75,15 @@ For each feature in plain words, with what could break it and the bugs hit, see
 3. The x402 facilitator settles the USDC transfer.
 4. The route writes the receipt onchain. Later, the hold sees that receipt and the copy counts as
    sold.
+
+### Paying with any crypto (Aurora Intents)
+1. The browser sends the signed offer, a token and a refund address to `/api/intents`.
+2. The server checks the offer like the x402 route does, stretches a pack's hold to 30 minutes,
+   and asks Aurora for exactly the price in USDC on Solana mainnet, to the shop. The deposit
+   address is saved in `intent_payments`, one per offer.
+3. The browser asks for the status every 5 seconds; the server asks Aurora.
+4. On SUCCESS, the server checks Aurora's record (recipient, token, amount), writes the usual
+   devnet receipt, and marks the copy sold. On a refund or failure, the copy goes back.
 
 ### A game
 1. **Offer:** the engine decides when. A row in `games` keeps the seed secret.
@@ -113,6 +123,7 @@ For each feature in plain words, with what could break it and the bugs hit, see
 | Daily email cap, double opt-in | `lib/mail/store.ts` |
 | Admin lock | `lib/admin.ts` |
 | Clearing non-Solana leads keeps paid-for leads and shared posts | `lib/research/store.ts` (`clearOffMission`) |
+| Any-crypto payments: price from the signed offer, paid only when Aurora's record matches | `app/api/intents/route.ts`, `lib/intents/pay.ts` |
 
 ## Deployment
 

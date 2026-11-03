@@ -172,6 +172,20 @@ export function shopStore(db: Db) {
       return rows.length === 1;
     },
 
+    /** Gives a hold more time (a cross-chain payment can take minutes). Only a live, unsold hold. */
+    async extendHold(nonce: string, until: Date): Promise<boolean> {
+      const rows = await db.query(
+        "UPDATE holds SET expires_at = greatest(expires_at, $2) WHERE nonce = $1 AND sold_at IS NULL AND released_at IS NULL RETURNING nonce",
+        [nonce, until],
+      );
+      return rows.length === 1;
+    },
+
+    /** Puts a held copy back on the shelf (the payment was refunded or failed). */
+    async releaseHold(nonce: string, now: Date): Promise<void> {
+      await db.query("UPDATE holds SET released_at = $2 WHERE nonce = $1 AND sold_at IS NULL AND released_at IS NULL", [nonce, now]);
+    },
+
     /** Marks a hold sold as soon as its payment is seen, so the count is right before it expires. */
     async markSold(nonce: string, now: Date): Promise<void> {
       await db.query("UPDATE holds SET sold_at = $2 WHERE nonce = $1 AND sold_at IS NULL AND released_at IS NULL", [nonce, now]);

@@ -61,6 +61,42 @@ export const copy = {
     note: "She replays every move herself. Only her count counts.",
   },
 
+  // Paying with any crypto through Aurora Intents (real money).
+  intents: {
+    button: "Pay with any crypto (real money)",
+    title: "Pay with any crypto",
+    realMoney: "Real money, not test USDC. You send your own token; the shop gets the exact price in USDC on Solana. Aurora Intents does the swap.",
+    payWith: "Pay with",
+    option: (symbol: string, chain: string) => `${symbol} on ${copy.intents.chainName(chain)}`,
+    chainName: (chain: string) =>
+      ({ eth: "Ethereum", base: "Base", arb: "Arbitrum", sol: "Solana", tron: "Tron", btc: "Bitcoin" } as Record<string, string>)[chain] ?? chain,
+    refund: (chain: string) => `Your ${chain} address, for a refund if anything goes wrong`,
+    refundPlaceholder: "The address you'll send from",
+    get: "Get my deposit address",
+    getting: "Asking Aurora...",
+    send: (amount: string, symbol: string, chain: string) => `Send exactly ${amount} ${symbol} on ${chain} to:`,
+    memo: (m: string) => `Memo: ${m}`,
+    copyAddress: "Copy the address",
+    before: (time: string) => `Before ${time} UTC. After that, Aurora sends it back.`,
+    status: {
+      PENDING_DEPOSIT: "Waiting for your payment...",
+      KNOWN_DEPOSIT_TX: "Seen it. Waiting for it to confirm...",
+      INCOMPLETE_DEPOSIT: "That's less than the amount. Send the rest, or it goes back to you.",
+      PROCESSING: "Got it. Swapping to USDC...",
+      SUCCESS: "Paid. Writing your receipt...",
+      REFUNDED: "Refunded to your address. Nothing was bought.",
+      FAILED: "It didn't go through. If anything left your wallet, it comes back to you.",
+    } as Record<string, string>,
+    errors: {
+      intents_off: "Paying with any crypto isn't switched on yet.",
+      intents_down: "Aurora isn't answering right now. Pay the usual way, or try again.",
+      bad_refund_address: "That doesn't look like an address.",
+      bad_token: "Pick something to pay with.",
+      cash_only: "Only a cash deal can be paid this way.",
+      sold_out: "That one's gone. Someone beat you to it.",
+    } as Record<string, string>,
+  },
+
   mail: {
     line: "I get new stuff in. Not often. Leave your email and I'll tell you when.",
     placeholder: "you@somewhere.com",
@@ -157,6 +193,12 @@ export const copy = {
     write: "Write the pack",
     working: "Working...",
     notebook: "Open the notebook",
+    intents: "Pay with any crypto (Aurora Intents)",
+    intentsKey: "Aurora Intents API key (from studio.aurora.dev; it isn't secret)",
+    intentsKeySet: "Key saved. Buyers see the button.",
+    intentsKeyMissing: "No key yet: the button stays hidden.",
+    shopUsdc: (v: boolean | "unknown") =>
+      v === true ? "The shop has a USDC account on Solana mainnet." : v === false ? "The shop has no USDC account on Solana mainnet yet: create one before taking real payments." : "Couldn't check the shop's mainnet USDC account.",
   },
 
   referred: "A friend sent you. Haggle like they did, and your buy counts for them.",

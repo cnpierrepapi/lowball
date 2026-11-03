@@ -131,6 +131,19 @@ describe("the dashboard's actions", () => {
     expect((await call(POST(req("POST", { action: "settings", mailLive: true }, { cookie })))).body.error).toMatch(/Zoho/);
     expect(await shopStore(db).setting("mail_live")).toBeUndefined();
   });
+
+  it("the Aurora Intents key: saved trimmed, shown as set, never sent back; junk refused", async () => {
+    const cookie = await signIn();
+    expect((await call(GET(req("GET", undefined, { cookie })))).body.intents.keySet).toBe(false);
+    expect((await call(POST(req("POST", { action: "settings", intentsApiKey: "  key-123  " }, { cookie })))).status).toBe(200);
+    expect(await shopStore(db).setting("intents_api_key")).toBe("key-123");
+    const o = await call(GET(req("GET", undefined, { cookie })));
+    expect(o.body.intents).toMatchObject({ keySet: true, payments: [] });
+    expect(JSON.stringify(o.body)).not.toContain("key-123");
+    expect((await call(POST(req("POST", { action: "settings", intentsApiKey: "two words" }, { cookie })))).status).toBe(400);
+    expect((await call(POST(req("POST", { action: "settings", intentsApiKey: "k".repeat(201) }, { cookie })))).status).toBe(400);
+    expect(await shopStore(db).setting("intents_api_key")).toBe("key-123");
+  });
 });
 
 describe("clearing non-Solana leads", () => {

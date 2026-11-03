@@ -9,7 +9,7 @@ Built for the Encode Club Solana Hackathon 2026 (Best Consumer App, Best Use of 
 - **Browse the shelf.** Each pack is a drop: a few copies, on sale between an opening and a closing time. When they're gone, they're gone.
 - **Read the free part.** The problem, links to the real posts where developers said it, and what already exists.
 - **Haggle.** Talk her down. Be rude and the price goes up. Walk away and she may call you back. Sometimes she gets bored and asks you to play Snake or Stack; a good score brings her price down.
-- **Pay.** Shake on a price and pay it in USDC over x402, with a wallet you already have or a demo wallet that comes with test USDC. You get the whole pack: the plan, a build prompt to paste into your AI coding tool, the tests, and the risks.
+- **Pay.** Shake on a price and pay it in USDC over x402, with a wallet you already have or a demo wallet that comes with test USDC. Or pay with any crypto you hold, with real money, through Aurora Intents: it swaps your token into exactly the price in USDC on Solana. You get the whole pack: the plan, a build prompt to paste into your AI coding tool, the tests, and the risks.
 - **Read her notebook.** Every lead she found, every part of its score with the maths, every check before she spent money, and what she found.
 - **Leave your email.** You'll hear when a new drop is scheduled. You confirm first, and you can leave any time.
 
