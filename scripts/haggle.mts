@@ -1,6 +1,8 @@
 // Plays a scripted haggle against the running app and prints every turn.
-// Usage: npx tsx scripts/haggle.mts [baseUrl] [script]
+// Usage: npx tsx scripts/haggle.mts [baseUrl] [script] [packId]
 const base = process.argv[2] ?? "http://localhost:3000";
+// The item to haggle: a pack with an open drop (the old book is off the shelf).
+const item = process.argv[4] ?? "dead-dapp-redeem";
 const scripts: Record<string, string[]> = {
   cash: [
     "hi, how much for the book",
@@ -24,7 +26,7 @@ const scripts: Record<string, string[]> = {
   ],
 };
 const lines = scripts[process.argv[3] ?? "cash"];
-let r = await fetch(`${base}/api/haggle`, { method: "POST", body: JSON.stringify({ item: "overlords" }) }).then((x) => x.json());
+let r = await fetch(`${base}/api/haggle`, { method: "POST", body: JSON.stringify({ item }) }).then((x) => x.json());
 console.log(`keeper: ${r.line}  [ask ${r.ask / 1e6}]`);
 for (const msg of lines) {
   const t = Date.now();

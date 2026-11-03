@@ -106,8 +106,8 @@ describe("her lines about games stay honest", () => {
   it("she may say the score the server worked out", () => {
     const s = ready();
     const d = gameResult(book, s, "snake", 7).decision;
-    expect(allowedNumbers(book, d, { kind: "chat", tone: "neutral" }).has("7")).toBe(true);
-    expect(allowedNumbers(book, counter(s), { kind: "chat", tone: "neutral" }).has("7")).toBe(false);
+    expect(allowedNumbers(book, d, { kind: "chat", tone: "neutral" }).counts.has("7")).toBe(true);
+    expect(allowedNumbers(book, counter(s), { kind: "chat", tone: "neutral" }).counts.has("7")).toBe(false);
   });
   it("the safe fallback lines pass the honesty guard", () => {
     const s = ready();

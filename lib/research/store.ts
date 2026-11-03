@@ -142,4 +142,3 @@ export function researchStore(db: Db) {
   };
 }
 
-export type ResearchStore = ReturnType<typeof researchStore>;

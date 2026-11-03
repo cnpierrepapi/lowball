@@ -90,10 +90,18 @@ function referralTarget(item: Item, mood: number): number {
   return clamp(t, 1, item.maxReferrals);
 }
 
-function concede(item: Item, s: State, toward: number): number {
+/** However low the offer, a real one moves her at least this much (never past the floor). */
+export const MIN_STEP = 3 * CENT;
+
+/**
+ * Her next ask after a real offer. She gives a share of the gap to the offer (or the floor):
+ * 0.45 × (1 − stubbornness), plus a little more in a good mood. For a pack (stubbornness 0.55)
+ * that's about 20% a round (owner's call, 3 Nov; it was 14% and felt like a wall).
+ */
+export function concede(item: Item, s: State, toward: number): number {
   const p = item.personality;
-  const rate = clamp(0.35 * (1 - p.stubbornness) + 0.15 * s.mood, 0.05, 0.5);
-  const next = toCents(s.ask - rate * (s.ask - toward));
+  const rate = clamp(0.45 * (1 - p.stubbornness) + 0.15 * s.mood, 0.05, 0.5);
+  const next = toCents(s.ask - Math.max(rate * (s.ask - toward), MIN_STEP));
   return clamp(next, item.floor, s.ask);
 }
 
@@ -185,7 +193,11 @@ export function step(item: Item, prev: State, intent: Intent): { state: State; d
           s.ask = raised;
           return decide("raise", { insulted });
         }
-        return decide("hold", { insulted }); // already at list, nowhere higher to go
+        // Already at list, nowhere higher to go. A real offer still moves her, by the least she
+        // can: rudeness costs mood, not a frozen haggle. (A very low offer often reads as rude.)
+        if (s.round >= item.maxRounds) return decide("final_offer", { insulted });
+        s.ask = clamp(toCents(s.ask - MIN_STEP), item.floor, s.ask);
+        return decide("counter", { insulted });
       }
 
       if (s.round >= item.maxRounds) return decide("final_offer", { insulted });

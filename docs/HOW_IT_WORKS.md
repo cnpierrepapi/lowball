@@ -3,6 +3,10 @@
 Plain-words notes on each feature: what the code does, what data moves where, what could
 break it, and every bug hit while building it and how it was fixed.
 
+It's a log, written in the order things were built, so a later section can change a number from an
+earlier one. For example, the research thresholds went from 40 / 60 to 25 / 40, and the mission moved
+to Solana. For the current picture in one place, see `ARCHITECTURE.md`.
+
 ## Games: "Entertain me"
 
 ### What it does
@@ -715,3 +719,52 @@ one of them in both titles.
   answer.
 
 Each rule was deleted in turn to check a test fails.
+
+## Last pass before the end of the build (3 Nov)
+
+### She gives ground faster, and a real offer always moves her
+- **Why low offers froze her.** Haiku often reads a very low offer (0.40 against 2.00) as rude.
+  When she's offended at her top price, the engine had nowhere to raise to, so it answered "hold"
+  and didn't move at all.
+- **Fixes in `lib/engine/negotiate.ts`:**
+  - **A real offer always moves her at least 3 cents,** never past her floor. Rudeness still costs
+    mood, and still raises the price when it can.
+  - **She concedes 0.45 × (1 − stubbornness) of the gap each round,** up from 0.35, plus a little
+    more in a good mood. For a pack (stubbornness 0.55) that's about 20%, the owner's call. Polite
+    offers on the live pack now go 2.10, 1.90, 1.75, 1.63, 1.53.
+- **Tests:**
+  - the 20,000-haggle random test still finds no deal under the floor;
+  - new tests cover the curve, the 3-cent minimum, and a rude lowball at top price still moving her.
+  - The first version of the minimum-step test passed even without the rule, because rounding to
+    the cent happened to give the same 3 cents. It was moved 4 cents above the floor, where the two
+    answers differ.
+
+### The honesty check tells money from counts in digits
+- **The gap:** she once said "hand over 4 for the book" because 4 was an allowed friend count. Game
+  scores made this more likely, since a score of 7 is an allowed number too.
+- **The fix:** the allowed numbers are now kept in two lists, prices and counts. A number in digits
+  only counts as a count when it sits next to what's being counted ("4 friends", "scored 7");
+  anything else has to be an allowed price. Numbers said in words already worked this way.
+- **A rule removed:** a separate "next to USDC or $ means money" rule turned out to change nothing.
+  A bare number already has to be a price, and deleting the rule failed no test. So it was taken
+  out.
+
+### `/lab` is gone from the live site
+It returns 404 in production builds. It still works when running locally, for the cover and
+stills scripts (`scripts/portrait.mts`, `scripts/stills.mts`).
+
+### Cleanup
+- **Removed, because nothing used them:**
+  - `numbersIn` (the honesty check has its own scan now);
+  - the `ResearchStore` type;
+  - the old `mailer()` (the dashboard's switch replaced it);
+  - three page strings: "Sticker price, if she had stickers", "Your friends came through", and
+    "Out of test USDC".
+- **`scripts/haggle.mts`** walked in on the old book, which is off the shelf. It now takes a pack id
+  and defaults to the live pack.
+- **The other scripts still work.** `e2e`, `pay` and `probe402` sign offers for the old book
+  directly, and the payment route still accepts it, so the devnet end-to-end script (cash,
+  pledges, referrals, refund and top-up) is unchanged.
+- **One old lint error** in `engine.test.ts` was fixed. Lint is clean.
+- **Docs:** the README was rewritten to match the code as it stands, and `docs/ARCHITECTURE.md`
+  was added.

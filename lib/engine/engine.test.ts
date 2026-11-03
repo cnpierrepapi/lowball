@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sanitizeIntent, type Intent, KINDS, TONES } from "./intent";
-import { MIN_PRICE, openState, pledgePrice, step, type Item, type State } from "./negotiate";
-import { toMicro } from "./money";
+import { MIN_PRICE, MIN_STEP, openState, pledgePrice, step, type Item, type State } from "./negotiate";
+import { CENT, toMicro } from "./money";
 
 const book: Item = {
   id: "overlords",
@@ -82,8 +82,32 @@ describe("haggling", () => {
     expect(atList.decision.action).not.toBe("raise");
   });
 
+  it("a real offer always moves her, even a lowball read as rude at her top price", () => {
+    for (const tone of ["rude", "polite", "threatening", "neutral"] as const) {
+      const r = step(book, openState(book), { kind: "offer", tone, amount: 0.4 });
+      if (r.state.status !== "open") continue; // a threat can end it outright
+      expect(r.state.ask).toBeLessThan(book.list);
+      expect(r.state.ask).toBeGreaterThanOrEqual(book.floor);
+    }
+    const s = { ...openState(book), ask: book.floor + 1 * CENT };
+    expect(step(book, s, { kind: "offer", tone: "polite", amount: 0.4 }).state.ask).toBe(book.floor); // never past the floor
+  });
+
+  it("the curve: about a fifth of the gap a round for a pack, and at least 3 cents", () => {
+    const pack: Item = { ...book, personality: { stubbornness: 0.55, temper: 0.6, vanity: 0.6 }, list: toMicro(2.1), floor: toMicro(1.16) };
+    let s = openState(pack);
+    const asks = [s.ask];
+    for (let i = 0; i < 4; i++) {
+      s = step(pack, s, { kind: "offer", tone: "neutral", amount: 1 }).state;
+      asks.push(s.ask);
+    }
+    expect(asks.map((a) => (a / 1e6).toFixed(2))).toEqual(["2.10", "1.90", "1.75", "1.63", "1.53"]); // rounded down to the cent
+    const near = { ...openState(pack), ask: pack.floor + 4 * CENT }; // a fifth of 4 cents is under 1 cent: the minimum takes over
+    expect(near.ask - step(pack, near, { kind: "offer", tone: "neutral", amount: 1 }).state.ask).toBe(MIN_STEP);
+  });
+
   it("calls you back once when you walk", () => {
-    let s = openState(book);
+    const s = openState(book);
     let r = step(book, s, { kind: "walk", tone: "neutral" });
     expect(r.decision.action).toBe("call_back");
     expect(r.state.ask).toBeLessThan(book.list);

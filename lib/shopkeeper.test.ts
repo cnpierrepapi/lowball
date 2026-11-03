@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { displayText, lineIsHonest, lineIsSafe } from "./shopkeeper";
 
 describe("lineIsHonest", () => {
-  const allowed = new Set(["1.60", "1.6", "2.00", "2", "5"]);
+  const allowed = { money: new Set(["1.60", "1.6", "2.00", "2"]), counts: new Set(["5"]) };
   it("passes the allowed figures in digits or words", () => {
     expect(lineIsHonest("[sighs] 1.60. Final.", allowed)).toBe(true);
     expect(lineIsHonest("One sixty. Final.", allowed)).toBe(true);
@@ -14,6 +14,17 @@ describe("lineIsHonest", () => {
     expect(lineIsHonest("A buck fifty, take it.", allowed)).toBe(false);
     expect(lineIsHonest("Bring three friends.", allowed)).toBe(false);
     expect(lineIsHonest("Ninety cents and it's yours.", allowed)).toBe(false);
+  });
+  it("tells money from counts in digits too (the 'hand over 4' bug)", () => {
+    const a = { money: new Set(["1.63", "2.10", "2.1"]), counts: new Set(["4", "7"]) };
+    expect(lineIsHonest("Hand over 4 for the book.", a)).toBe(false); // 4 was a friend count, not a price
+    expect(lineIsHonest("That's 4 USDC.", a)).toBe(false);
+    expect(lineIsHonest("$7 and it's yours.", a)).toBe(false);
+    expect(lineIsHonest("You scored 7. 1.63 USDC, then.", a)).toBe(true);
+    expect(lineIsHonest("Bring 4 friends and pay 1.63.", a)).toBe(true);
+    expect(lineIsHonest("7 points. Fine. 2.10 USDC.", a)).toBe(true);
+    expect(lineIsHonest("Bring 5 friends.", a)).toBe(false); // a count, but not the allowed one
+    expect(lineIsHonest("It's 2.1 now.", a)).toBe(true);
   });
 });
 

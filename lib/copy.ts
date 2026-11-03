@@ -11,7 +11,6 @@ export const copy = {
   send: "Say it",
   hisPrice: "Her price",
   yourDeal: "Your deal",
-  listed: "Sticker price, if she had stickers",
   mood: "Mood",
   moods: ["Livid", "Fuming", "Grumpy", "Tolerating you", "Almost fond"],
   devnet: "Devnet. Test money only.",
@@ -33,7 +32,6 @@ export const copy = {
   topUp: (gap: number) => `Pay the ${u(gap)} gap and take it`,
   refund: (p: number) => `Get my ${u(p)} back`,
   refunded: "Refunded. Every cent.",
-  released: "Your friends came through. It's yours.",
 
   peek: "Peek inside",
   peekTitle: "A free look. She lets you read the first page standing up.",
@@ -168,7 +166,6 @@ export const copy = {
     real: (name: string, addr: string, bal: string) => `${name} ${addr.slice(0, 4)}..${addr.slice(-4)}, ${bal} USDC`,
     funding: "Filling it up...",
     demo: (bal: string) => `Demo wallet, ${bal} USDC`,
-    low: "Out of test USDC.",
     refill: "Refill",
   },
 
