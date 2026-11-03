@@ -222,7 +222,22 @@ export default function AdminPage() {
               {a.autoDrop}
             </label>
           </div>
-          <button disabled={busy} onClick={() => act({ action: "watch" })} className={`${btn} mt-3`}>{busy ? a.working : a.watchNow}</button>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button disabled={busy} onClick={() => act({ action: "watch" })} className={btn}>{busy ? a.working : a.watchNow}</button>
+            <button
+              disabled={busy}
+              onClick={() => {
+                if (!window.confirm(a.clearConfirm)) return;
+                act({ action: "clear_off_mission" }, (j) => {
+                  const c = j.cleared as { leads: number; posts: number };
+                  setMsg(a.cleared(c.leads, c.posts));
+                });
+              }}
+              className={btnLine}
+            >
+              {a.clear}
+            </button>
+          </div>
           <ul className="mt-3 flex flex-col gap-1 text-sm">
             {o.research.leads.map((l) => (
               <li key={l.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-[#151311]/10 pt-1">

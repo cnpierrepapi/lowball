@@ -112,6 +112,7 @@ For each feature in plain words, with what could break it and the bugs hit, see
 | No money spent on an unvalidated lead | `lib/research/coordinator.ts`, `loop.ts` (`investigate`) |
 | Daily email cap, double opt-in | `lib/mail/store.ts` |
 | Admin lock | `lib/admin.ts` |
+| Clearing non-Solana leads keeps paid-for leads and shared posts | `lib/research/store.ts` (`clearOffMission`) |
 
 ## Deployment
 

@@ -133,6 +133,16 @@ describe("the dashboard's actions", () => {
   });
 });
 
+describe("clearing non-Solana leads", () => {
+  it("needs the login, and reports what it deleted", async () => {
+    expect((await call(POST(req("POST", { action: "clear_off_mission" })))).status).toBe(401);
+    const cookie = await signIn();
+    await db.query("INSERT INTO posts (id, source, url, title, excerpt, author, engagement, posted_at, seen_at) VALUES ('hn:1', 'hn', 'u', 'Bread ovens', 'a cheaper oven timer', 'x', 0, now(), now())");
+    await db.query(`INSERT INTO leads (id, title, terms, post_ids, score, total, verdict, first_seen, updated_at) VALUES ('hn:1', 'Bread ovens', '{oven}', '{hn:1}', '{}'::jsonb, 10, 'IGNORE', now(), now())`);
+    expect((await call(POST(req("POST", { action: "clear_off_mission" }, { cookie })))).body).toEqual({ cleared: { leads: 1, posts: 1 } });
+  });
+});
+
 describe("when something breaks", () => {
   it("the dashboard gets the error as JSON, with where it happened, not a bare crash", async () => {
     const cookie = await signIn();
