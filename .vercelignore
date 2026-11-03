@@ -13,3 +13,10 @@
 !/next-env.d.ts
 !/eslint.config.mjs
 !/README.md
+# The build runs the database migrations first (npm run build), and Vercel reads the daily
+# mail cron from vercel.json. Only the migration script itself, not the rest of scripts/.
+!/db
+!/scripts
+/scripts/*
+!/scripts/migrate.mts
+!/vercel.json

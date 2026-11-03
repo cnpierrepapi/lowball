@@ -312,3 +312,10 @@ found four rules with no test that caught them; see the bugs below.
    packages.
 5. **Stopping the dev server killed my own shell** halfway through writing these notes, so they
    had to be written twice. Nothing in the app was affected.
+6. **The first preview build failed: "Cannot find module scripts/migrate.mts".** `.vercelignore`
+   is an allowlist: Vercel only uploads the folders it names, so wallet keys and notes can never
+   ride along. `scripts/`, `db/` and `vercel.json` weren't on it. So the migration script and its
+   SQL never reached Vercel, and the daily cron in `vercel.json` would have been ignored as well.
+   Fix: the allowlist now adds `db/`, `vercel.json` and `scripts/migrate.mts` only (the rest of
+   `scripts/` stays local). To prove it, I copied only the files the allowlist lets through into
+   an empty folder, then ran a clean `npm ci` and `npm run build` there. Both passed.
