@@ -44,6 +44,26 @@ export const copy = {
     notYet: "Not yours yet. It unlocks once the deal is done.",
   },
 
+  game: {
+    names: { snake: "Snake", stack: "Stack" } as Record<string, string>,
+    offer: (name: string) => `She's bored. She wants a game of ${name}.`,
+    deal: "Play well and she might come down. Play badly and nothing changes.",
+    play: "Entertain her",
+    later: "Not now",
+    how: {
+      snake: "Arrow keys or swipe. Eat the red dots. Don't hit the walls or yourself.",
+      stack: "Tap, click or press space to drop the block. Line it up with the one below.",
+    } as Record<string, string>,
+    starting: "Setting up the board...",
+    countdown: (n: number) => `${n}`,
+    score: (n: number) => `Score ${n}`,
+    secondsLeft: (s: number) => `${s}s`,
+    stop: "Stop here",
+    sending: "She's checking your moves...",
+    note: "She replays every move herself. Only her count counts.",
+    close: "Back to haggling",
+  },
+
   referred: "A friend sent you. Haggle like they did, and your buy counts for them.",
 
   wallet: {
@@ -71,6 +91,8 @@ export const copy = {
     not_set_up: "The shop isn't open yet. The owner forgot a key.",
     tap_dry: "The shop's out of test money. Grab devnet USDC at faucet.circle.com.",
     wallet_refused: "Your wallet said no. Try again, or take a demo wallet.",
+    no_game: "That game went cold. Keep haggling.",
+    game_rejected: "She watched the replay and didn't buy it. Nothing changed.",
     generic: "Something broke. Try again.",
   } as Record<string, string>,
 };

@@ -2,22 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { SHELF } from "@/lib/catalog";
 import { formatUsdc } from "@/lib/engine/money";
-import { openState, step, type State } from "@/lib/engine/negotiate";
+import { openState, step } from "@/lib/engine/negotiate";
 import { signOffer } from "@/lib/offer";
 import { seal, unseal } from "@/lib/seal";
 import { displayText, readIntent, speak, type Turn } from "@/lib/shopkeeper";
 import { allow, clientIp } from "@/lib/limits";
 import { ModelConfigError } from "@/lib/claude";
 import { ConfigError } from "@/lib/config";
+import { gameToOffer, offerGame } from "@/lib/engine/games";
+import { gameStore } from "@/lib/games/store";
+import { newSeed } from "@/lib/games/play";
+import type { Session } from "@/lib/session";
 
-interface Session {
-  item: string;
-  state: State;
-  history: Turn[];
-  exp: number;
-  ref?: string; // came in through a pledger's link
-  turns?: number; // every message counts, chat included
-}
 
 const SESSION_TTL = 60 * 60;
 const OFFER_TTL = 5 * 60;
@@ -63,7 +59,7 @@ async function haggle(req: NextRequest) {
     if (!item) return NextResponse.json({ error: "no_such_item" }, { status: 404 });
     const line = opening(item.name, item.list);
     const ref = typeof body.ref === "string" && UUID.test(body.ref) ? body.ref : undefined;
-    const session: Session = { item: item.id, state: openState(item), history: [{ who: "keeper", text: displayText(line) }], exp: now + SESSION_TTL, ref };
+    const session: Session = { id: randomUUID(), item: item.id, state: openState(item), history: [{ who: "keeper", text: displayText(line) }], exp: now + SESSION_TTL, ref };
     return NextResponse.json({
       line: displayText(line),
       action: "open",
@@ -87,11 +83,29 @@ async function haggle(req: NextRequest) {
     console.error("readIntent failed, treating as chat:", (e as Error).message);
     return { kind: "chat", tone: "neutral" } as const;
   });
-  const { state, decision } = step(item, session.state, intent);
+  let { state, decision } = step(item, session.state, intent);
+
+  // She may get bored. The engine decides; the game only happens if it's saved for single use.
+  // If the store is off or down, she just keeps haggling.
+  let game: Session["game"];
+  const kind = session.id ? gameToOffer(item, state, decision, session.id) : undefined;
+  const store = kind && gameStore();
+  if (kind && store && session.id) {
+    const id = randomUUID();
+    try {
+      await store.offer({ id, haggle: session.id, kind, seed: newSeed() });
+      ({ state, decision } = offerGame(state, decision, kind));
+      game = { id, kind };
+    } catch (e) {
+      console.error("game offer:", (e as Error).message);
+    }
+  }
+
   const line = await speak(item, decision, intent, session.history, message);
 
   const history: Turn[] = [...session.history, { who: "buyer" as const, text: message }, { who: "keeper" as const, text: displayText(line) }].slice(-12);
-  const next: Session = { ...session, state, history, turns };
+  // Saying anything else walks away from a game she offered earlier.
+  const next: Session = { ...session, state, history, turns, game };
 
   const offer =
     decision.deal && (decision.action === "deal" || decision.action === "pledge_deal")
@@ -111,6 +125,7 @@ async function haggle(req: NextRequest) {
     offer,
     offerExpiresAt: offer ? now + OFFER_TTL : undefined,
     intent,
+    game,
     session: seal("session", next),
   });
 }

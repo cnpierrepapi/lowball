@@ -2,7 +2,7 @@
 // Each cue is a few oscillator or noise notes with a fast decay, so they read as "events",
 // not music, and stay out of the way of the words on screen.
 
-export type Cue = "open" | "line" | "scoff" | "slam" | "deal" | "paid" | "door";
+export type Cue = "open" | "line" | "scoff" | "slam" | "deal" | "paid" | "door" | "point" | "crash";
 
 export interface Sounds {
   play(cue: Cue): void;
@@ -70,6 +70,10 @@ export function createSounds(): Sounds {
     },
     // Money landed: coins.
     paid: () => [1568, 2093, 2637, 3136].forEach((f, i) => note({ freq: f, at: i * 0.07, len: 0.35, vol: 0.14 })),
+    // A point in a game: a short blip.
+    point: () => note({ freq: 880, to: 1320, type: "square", len: 0.08, vol: 0.06 }),
+    // Game over: a falling buzz.
+    crash: () => note({ freq: 220, to: 70, type: "sawtooth", len: 0.4, vol: 0.12 }),
     // Thrown out: the door slams.
     door: () => {
       note({ freq: 90, to: 40, len: 0.5, vol: 0.7 });
