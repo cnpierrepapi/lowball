@@ -675,6 +675,43 @@ describe("the loop", () => {
     expect(mailer.box[0].email.text).toContain("3 copies. Haggling opens Fri 6 Nov, 18:00 UTC.");
   });
 
+  it("clearing non-Solana leads: deletes them and the posts only they use; keeps Solana leads and anything paid for", async () => {
+    const old: Post[] = [
+      { id: "hn:70", source: "hn", url: "https://news.ycombinator.com/item?id=70", title: "Casio watches", excerpt: "I wish there was a minimal Casio watch with heart rate.", author: "a1", engagement: 3, postedAt: hoursAgo(2) },
+      { id: "hn:71", source: "hn", url: "https://news.ycombinator.com/item?id=71", title: "Bread ovens", excerpt: "Someone should build a cheaper bread oven timer.", author: "a2", engagement: 3, postedAt: hoursAgo(3) },
+    ];
+    const d = deps({ fetch: fakeFetch([...flaky.filter((p) => p.source === "hn"), ...old], flaky.filter((p) => p.source === "github")) });
+    await watch(d);
+    const store = researchStore(db);
+    const before = await store.leads();
+    expect(before.map((l) => l.id).sort()).toEqual(["gh:zed/run#3", "hn:70", "hn:71"].sort());
+    // Pretend she spent money on the oven lead: it must survive the clear.
+    await store.spend("hn:71", "investigate", 0.3, {}, NOW);
+
+    expect(await store.clearOffMission()).toEqual({ leads: 1, posts: 1 });
+    expect((await store.leads()).map((l) => l.id).sort()).toEqual(["gh:zed/run#3", "hn:71"]);
+    expect(await store.postsByIds(["hn:70"])).toEqual([]);
+    expect(await store.postsByIds(["hn:1"])).toHaveLength(1);
+
+    // The next watch (sources now quiet) doesn't bring it back.
+    await watch(deps({ fetch: fakeFetch([], []) }));
+    expect((await store.leads()).map((l) => l.id)).not.toContain("hn:70");
+  });
+
+  it("clearing never deletes a post a remaining lead still uses", async () => {
+    const ins = (id: string, title: string, excerpt: string) =>
+      db.query("INSERT INTO posts (id, source, url, title, excerpt, author, engagement, posted_at, seen_at) VALUES ($1, 'hn', 'u', $2, $3, 'x', 0, now(), now())", [id, title, excerpt]);
+    await ins("hn:p1", "Bread ovens", "a cheaper oven timer");
+    await ins("hn:p2", "Oven timers", "timers for ovens");
+    await ins("hn:p3", "Solana wallet export", "export a solana wallet history");
+    const lead = (id: string, posts: string[], cross: string[]) =>
+      db.query("INSERT INTO leads (id, title, terms, post_ids, cross_ids, score, total, verdict, first_seen, updated_at) VALUES ($1, 't', '{}', $2, $3, '{}'::jsonb, 10, 'IGNORE', now(), now())", [id, posts, cross]);
+    await lead("hn:p1", ["hn:p1", "hn:p2"], []);
+    await lead("hn:p3", ["hn:p3"], ["hn:p2"]);
+    expect(await researchStore(db).clearOffMission()).toEqual({ leads: 1, posts: 1 });
+    expect((await researchStore(db).postsByIds(["hn:p1", "hn:p2"])).map((p) => p.id)).toEqual(["hn:p2"]);
+  });
+
   it("daily: watch, then one investigation and one pack, best lead first", async () => {
     const d = deps();
     const r = await daily(d);

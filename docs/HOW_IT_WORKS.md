@@ -768,3 +768,25 @@ stills scripts (`scripts/portrait.mts`, `scripts/stills.mts`).
 - **One old lint error** in `engine.test.ts` was fixed. Lint is clean.
 - **Docs:** the README was rewritten to match the code as it stands, and `docs/ARCHITECTURE.md`
   was added.
+
+## Clearing non-Solana leads (3 Nov, after the build)
+
+**What it does.** The dashboard's "Clear non-Solana leads" button, after a confirm, deletes every
+lead where none of the posts mentions a word from the mission's Solana and crypto list.
+
+**What it keeps:**
+- leads she has already spent money on, or worked on, so the spending trail stays whole;
+- every Solana lead.
+
+**Why the posts go too.** Each watch rebuilds leads from the posts saved in the last 30 days, so
+deleting a lead alone would only last until the next run. The clear also deletes the posts that
+only those leads use, but never a post that a remaining lead still uses.
+
+**Tests:**
+- non-Solana leads go;
+- Solana leads and paid-for leads stay;
+- the next watch doesn't bring them back;
+- a shared post survives;
+- the dashboard action needs the login.
+
+Each rule was checked by deleting it.

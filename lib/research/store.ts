@@ -3,6 +3,7 @@ import type { Post } from "./sources";
 import type { Score, Verdict } from "./score";
 import type { Checks } from "./coordinator";
 import type { Investigation } from "./model";
+import { CRYPTO_WORDS } from "./coordinator";
 
 // The notebook's tables. Only the server reads and writes them.
 
@@ -131,6 +132,33 @@ export function researchStore(db: Db) {
         [now],
       );
       return Number(rows[0]?.usd ?? 0);
+    },
+
+    /**
+     * Deletes leads that have nothing to do with Solana or crypto (no post mentions a word from the
+     * mission's list), and the posts only they use, so the next watch can't rebuild them. Leads she
+     * already spent money on, or worked on, are kept: the spending trail stays whole.
+     */
+    async clearOffMission(): Promise<{ leads: number; posts: number }> {
+      const leads = (await db.query("SELECT * FROM leads")).map(leadFrom);
+      const all = new Map((await db.query("SELECT * FROM posts")).map((r) => [String(r.id), postFrom(r)]));
+      const spent = new Set((await db.query<{ lead_id: string }>("SELECT DISTINCT lead_id FROM research_spend WHERE lead_id IS NOT NULL")).map((r) => r.lead_id));
+      const crypto = new Set(CRYPTO_WORDS);
+      const offMission = (l: Lead) => {
+        const text = [...l.postIds, ...l.crossIds].map((id) => all.get(id)).filter(Boolean).map((p) => `${p!.title} ${p!.excerpt}`).join(" ").toLowerCase();
+        return !(text.match(/[a-z0-9+#.-]+/g) ?? []).some((w) => crypto.has(w));
+      };
+      const gone = leads.filter((l) => l.status === "new" && !spent.has(l.id) && offMission(l));
+      const keep = leads.filter((l) => !gone.includes(l));
+      const kept = new Set(keep.flatMap((l) => [...l.postIds, ...l.crossIds]));
+      const posts = [...new Set(gone.flatMap((l) => [...l.postIds, ...l.crossIds]))].filter((id) => !kept.has(id));
+      if (gone.length) {
+        await db.transaction([
+          ["DELETE FROM leads WHERE id = ANY($1::text[])", [gone.map((l) => l.id)]],
+          ["DELETE FROM posts WHERE id = ANY($1::text[])", [posts]],
+        ]);
+      }
+      return { leads: gone.length, posts: posts.length };
     },
 
     async spendLog(limit = 50) {

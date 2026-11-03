@@ -149,6 +149,8 @@ async function act(body: Record<string, unknown>) {
       return { result: await investigate((await liveDeps())!, String(body.leadId), { force: body.force === true }) };
     case "write":
       return { result: await write((await liveDeps())!, String(body.leadId)) };
+    case "clear_off_mission":
+      return { cleared: await researchStore(d).clearOffMission() };
     case "send_mail":
       return { sent: await drain(mailStore(d), await activeMailer(), { cap: dailyCap(), budgetMs: 45_000 }) };
     case "settings": {
