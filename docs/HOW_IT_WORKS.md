@@ -873,3 +873,16 @@ buyer's panel in a browser.
   with a no-op, the same way the test stands in for any other request.
 - **The test pack's id was too short.** Pack ids are checked in the database (3 to 32
   characters), so "p1" became "pk1".
+
+### Her wallet address in the back office (3 Nov)
+
+**What it does.** The Aurora box in /admin shows the shop's Solana address, with a copy button.
+That's where Aurora delivers USDC on mainnet, and it's where to send a little USDC to create her
+mainnet USDC account. The server reads the address it already uses for every payment; nothing new
+is stored. Only the signed-in admin sees it, and the box says so if the server doesn't have one.
+
+**Why.** The box warned that her mainnet USDC account was missing but never said which address to
+fund, and the address only lived in the server's settings.
+
+**Test:** the signed-in admin gets the address; a visitor who isn't signed in doesn't; a server
+without it gets nothing. Deleting the line that reads it fails the test.

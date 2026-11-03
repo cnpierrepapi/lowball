@@ -132,6 +132,19 @@ describe("the dashboard's actions", () => {
     expect(await shopStore(db).setting("mail_live")).toBeUndefined();
   });
 
+  it("her wallet address is shown to the signed-in admin, and only them", async () => {
+    process.env.MERCHANT_ADDRESS = "Shop1111111111111111111111111111111111111111";
+    try {
+      const cookie = await signIn();
+      expect((await call(GET(req("GET", undefined, { cookie })))).body.intents.shopAddress).toBe("Shop1111111111111111111111111111111111111111");
+      expect(JSON.stringify((await call(GET(req("GET")))).body)).not.toContain("Shop1111");
+      delete process.env.MERCHANT_ADDRESS;
+      expect((await call(GET(req("GET", undefined, { cookie })))).body.intents.shopAddress).toBeNull();
+    } finally {
+      delete process.env.MERCHANT_ADDRESS;
+    }
+  });
+
   it("the Aurora Intents key: saved trimmed, shown as set, never sent back; junk refused", async () => {
     const cookie = await signIn();
     expect((await call(GET(req("GET", undefined, { cookie })))).body.intents.keySet).toBe(false);

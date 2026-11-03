@@ -13,6 +13,7 @@ import { investigate, scheduleDrop, settings, watch, write } from "@/lib/researc
 import { researchStore } from "@/lib/research/store";
 import { liveDeps } from "@/lib/research/service";
 import { intentsKey, shopHasMainnetUsdc } from "@/lib/intents/service";
+import { merchantAddress } from "@/lib/x402";
 
 // The admin dashboard's one route. Everything but logging in needs the admin cookie.
 // Research steps can take minutes, so this may run up to 5 minutes.
@@ -66,6 +67,8 @@ async function overview() {
     },
     intents: {
       keySet: Boolean(await intentsKey()),
+      // Public: it's where every payment goes. Null when the server doesn't have it.
+      shopAddress: (() => { try { return merchantAddress(); } catch { return null; } })(),
       shopUsdc: await shopHasMainnetUsdc(),
       payments: await d.query("SELECT nonce, item, price, status, amount_in_text, receipt_written, created_at FROM intent_payments ORDER BY created_at DESC LIMIT 10"),
     },
