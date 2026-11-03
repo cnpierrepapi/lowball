@@ -11,6 +11,7 @@ Every time `main` goes live, the code gets a tag, so there's always a named poin
 | `v2.3` | She gives ground faster (about 20% a round for a pack, 3-cent minimum, a lowball at her top price still moves her); the honesty check keeps money apart from counts; `/lab` off the live site; cleanup; README and architecture docs. Merge commit `d1e2af3`, live since 3 Nov 2026. |
 | `v2.4` | "Clear non-Solana leads" in the back office. Merge commit `acc7eb9`, live since 3 Nov 2026. |
 | `v2.5` | The mission check needs a real Solana or crypto word. Merge commit `b2e9b09`, live since 3 Nov 2026. |
+| `v2.6` | Pay with any crypto through Aurora Intents (real money, mainnet), next to x402. Merge commit `fc5fb6c`, live since 3 Nov 2026. |
 
 The tags exist in the local repo, but the cloud session that made the release couldn't push tags.
 To put them on GitHub: Releases, "Draft a new release", type the tag name, pick the commit above
