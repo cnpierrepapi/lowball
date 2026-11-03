@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lineIsHonest, lineIsSafe } from "./shopkeeper";
+import { displayText, lineIsHonest, lineIsSafe } from "./shopkeeper";
 
 describe("lineIsHonest", () => {
   const allowed = new Set(["1.60", "1.6", "2.00", "2", "5"]);
@@ -32,5 +32,11 @@ describe("lineIsSafe", () => {
   });
   it("refuses a monologue", () => {
     expect(lineIsSafe("blah ".repeat(80), "hi")).toBe(false);
+  });
+});
+
+describe("displayText", () => {
+  it("drops bracketed tags and *stage directions*", () => {
+    expect(displayText("[sighs] Fine, 2.00 USDC it is. *Sigh.* Shake on it.")).toBe("Fine, 2.00 USDC it is. Shake on it.");
   });
 });

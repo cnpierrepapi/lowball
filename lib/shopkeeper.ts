@@ -26,7 +26,7 @@ const READ_RULES = `You label one message from a buyer haggling in a shop.
 Labels:
 - offer: the buyer names a price they'd pay. amount = that price in USDC as a number.
 - accept: the buyer takes the shopkeeper's current ask ("deal", "fine", "I'll take it").
-- referral: the buyer offers to bring, tell or refer friends. referrals = how many people, only if they said a number.
+- referral: the buyer offers, suggests or asks about bringing, telling or referring friends, even as a question ("what if I tell my friends?"). referrals = how many people, only if they said a number.
 - walk: the buyer is leaving or giving up.
 - chat: anything else.
 tone is how the message comes across. Use null for amount or referrals when the buyer didn't give one.
@@ -209,5 +209,6 @@ ${message.slice(0, 600)}
 }
 
 export function displayText(line: string): string {
-  return line.replace(/\[[^\]]*\]\s*/g, "").replace(/\s{2,}/g, " ").trim();
+  // Bracketed tags and *stage directions* are never shown.
+  return line.replace(/\[[^\]]*\]\s*/g, "").replace(/\*[^*\n]{1,40}\*\s*/g, "").replace(/\s{2,}/g, " ").trim();
 }
