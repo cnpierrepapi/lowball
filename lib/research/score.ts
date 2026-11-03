@@ -60,10 +60,18 @@ export function cluster(posts: Post[], minShared = 3, minJ = 0.2): Cluster[] {
       home.sets.push(set);
     } else groups.push({ posts: [p], sets: [set] });
   }
+  // A lead's key words: the ones most of its posts use, then the ones in titles, then the rarest
+  // across everything read (a word every post uses says nothing about this one). These words
+  // are what the cross-check searches the other sites with.
+  const df = new Map<string, number>();
+  for (const g of groups) for (const set of g.sets) for (const t of set) df.set(t, (df.get(t) ?? 0) + 1);
+  const total = sorted.length || 1;
   return groups.map((g) => {
     const counts = new Map<string, number>();
     for (const s of g.sets) for (const t of s) counts.set(t, (counts.get(t) ?? 0) + 1);
-    const top = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 8).map(([t]) => t);
+    const inTitle = new Set(g.posts.flatMap((p) => terms(p.title)));
+    const weight = (t: string) => counts.get(t)! * (inTitle.has(t) ? 2 : 1) * Math.log(1 + total / (df.get(t) ?? 1));
+    const top = [...counts.keys()].sort((a, b) => weight(b) - weight(a) || a.localeCompare(b)).slice(0, 8);
     return { id: g.posts[0].id, posts: g.posts, terms: top };
   });
 }
@@ -75,7 +83,8 @@ export const PAIN_WORDS = [
   "can't find", "cannot find", "doesn't exist", "workaround",
 ];
 
-export const THRESHOLDS = { WATCH: 40, INVESTIGATE: 60 } as const;
+// Lowered on 3 Nov (owner's call): a real week of posts topped out at 31, so 60 was never reached.
+export const THRESHOLDS = { WATCH: 25, INVESTIGATE: 40 } as const;
 export type Verdict = "IGNORE" | "WATCH" | "INVESTIGATE";
 
 export interface Component {
@@ -108,9 +117,10 @@ export function partialScore(c: Cluster, now: Date) {
   return {
     velocity: { points: pts(recent / 3), inputs: { postsLast48h: recent }, rule: "20 × min(1, posts in the last 48 hours ÷ 3)" },
     sources: {
-      points: pts(Math.min(1, (authors - 1) / 3) * 0.75 + (platforms > 1 ? 0.25 : 0)),
-      inputs: { people: authors, platforms, repos },
-      rule: "20 × (0.75 × min(1, (different people − 1) ÷ 3) + 0.25 if seen on both HN and GitHub)",
+      // Agreement between different sites counts most: one site's crowd can be an echo.
+      points: pts(0.6 * Math.min(1, (platforms - 1) / 2) + 0.4 * Math.min(1, (authors - 1) / 3)),
+      inputs: { places: platforms, people: authors, repos },
+      rule: "20 × (0.6 × min(1, (different sites − 1) ÷ 2) + 0.4 × min(1, (different people − 1) ÷ 3))",
     },
     size: { points: pts(Math.log10(1 + engagement) / 3), inputs: { engagement }, rule: "20 × min(1, log10(1 + points and comments) ÷ 3)" },
     pain: { points: pts(painFound.length / 4), inputs: { painWords: painFound.join(", ") || null }, rule: "20 × min(1, different pain phrases ÷ 4)" },
@@ -138,4 +148,15 @@ export function fullScore(c: Cluster, now: Date, repoCount: number | null): Scor
 export function worthNoveltyCheck(c: Cluster, now: Date): boolean {
   const p = partialScore(c, now);
   return p.velocity.points + p.sources.points + p.size.points + p.pain.points + 20 >= THRESHOLDS.INVESTIGATE;
+}
+
+/** How many of the lead's words a post shares: the cross-check keeps posts sharing at least 3. */
+export function sharedTerms(post: Pick<Post, "title" | "excerpt">, leadTerms: string[]): number {
+  const mine = new Set(terms(`${post.title} ${post.excerpt}`));
+  return leadTerms.filter((t) => mine.has(t)).length;
+}
+
+/** The different sites a lead's posts come from. */
+export function places(posts: Pick<Post, "source">[]): string[] {
+  return [...new Set(posts.map((p) => p.source))].sort();
 }

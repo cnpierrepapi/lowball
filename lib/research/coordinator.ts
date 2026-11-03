@@ -19,9 +19,20 @@ export interface Check {
 
 export interface Checks {
   onMission: Check;
+  seenTwice: Check;
   notInvestigated: Check;
   underCap: Check;
   pass: boolean;
+}
+
+/**
+ * Validated: the same need turned up on at least 2 different sites (directly or through the
+ * cross-check). Applies to every investigation, including "investigate anyway".
+ */
+export function seenTwice(placesSeen: string[]): Check {
+  return placesSeen.length >= 2
+    ? { ok: true, why: `seen on ${placesSeen.join(", ")}` }
+    : { ok: false, why: `only seen on ${placesSeen.join(", ") || "nothing"}; needs 2 different sites` };
 }
 
 /** Inside the mission if at least 2 developer words show up, and it isn't one app's feature request. */
@@ -61,6 +72,6 @@ export function underCap(spentThisMonth: number, capUsd: number, step: keyof typ
     : { ok: false, why: `${line} would pass the $${capUsd.toFixed(2)} cap` };
 }
 
-export function checks(c: { onMission: Check; notInvestigated: Check; underCap: Check }): Checks {
-  return { ...c, pass: c.onMission.ok && c.notInvestigated.ok && c.underCap.ok };
+export function checks(c: { onMission: Check; seenTwice: Check; notInvestigated: Check; underCap: Check }): Checks {
+  return { ...c, pass: c.onMission.ok && c.seenTwice.ok && c.notInvestigated.ok && c.underCap.ok };
 }

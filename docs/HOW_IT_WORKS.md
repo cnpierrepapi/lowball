@@ -530,3 +530,83 @@ notebook.
 As before, each rule was deleted in turn to check a test fails. The one rule no test catches on
 its own is the password's set-once guard in `lib/admin.ts`. The database's set-once write enforces
 the same thing, and that write has its own test.
+
+## More sources, and cross-checking (3 Nov, later)
+
+### What changed
+
+- **Six sources instead of two.** All are free, need no key, and use no model; the search runs on
+  its own.
+
+  | Source | How she reads it |
+  |---|---|
+  | Hacker News, GitHub issues | As before. |
+  | Stack Overflow and Software Engineering | Stack Exchange API. |
+  | Reddit | r/programming, webdev, devops, ExperiencedDevs, selfhosted and SideProject, through the search RSS. |
+  | dev.to | "discuss" and "help" posts. |
+  | Lobsters | Newest stories. |
+
+  Bluesky (403) and Mastodon (search is empty without an account) were tested and left out.
+- **The cross-check.** After grouping, the 5 best leads that could ever be investigated (on
+  mission, and not one project's feature request) are looked up on the sites they haven't turned
+  up on yet, using the lead's 3 key words. A post found this way joins the lead if it shares at
+  least 3 of the lead's words. It stays attached in later runs (`leads.cross_ids`), and the
+  notebook marks it "found by cross-check".
+- **Validation before money.** A new coordinator check, "Seen in 2 places": no lead is
+  investigated, not even by hand, unless its posts come from at least 2 different sites.
+- **Scoring.**
+  - Sources is now 20 × (0.6 × min(1, (different sites − 1) ÷ 2) + 0.4 × min(1, (different
+    people − 1) ÷ 3)), so agreement between sites counts more than a crowd on one site.
+  - Thresholds, set by the owner: under 25 is IGNORE, 25 to 39 is WATCH, 40 and up is
+    INVESTIGATE.
+- **Key words.** A lead's key words are ranked by how many of its posts use them, by whether they
+  appear in titles, and by how rare they are across everything read that week.
+
+### Staying inside the free limits
+
+| Source | Limit | Calls per run |
+|---|---|---|
+| GitHub | 10 searches a minute | 5 phrases, 3 repo counts, 2 cross-checks |
+| Reddit | Throttles hard | All five phrases in one query, plus 2 cross-checks |
+| Stack Exchange | 300 calls a day per network address | 4 watch searches, plus at most 5 cross-checks |
+
+When any of them says no, the run notes it in its errors and carries on.
+
+### Live run (3 Nov, all six sources, no model)
+
+- **Read:** 245 posts. 30 from HN, 211 from GitHub, 1 from Stack Overflow, 3 from Reddit, none
+  from dev.to or Lobsters that week.
+- **Grouped:** 235 leads.
+- **Cross-checked:** 5 leads, which pulled in 3 posts from other sites.
+- **Result:** one lead (production server addresses in release builds) is now confirmed on 2
+  sites and scores 41, which is INVESTIGATE.
+- **Throttled:** Reddit answered 429 twice during the cross-checks; the run carried on.
+
+### Bugs hit, and the fixes
+
+1. **Reddit's JSON answered 403 to servers.** Fix: its search RSS, which answers.
+2. **Reddit then answered 429 (too many requests)** after a few calls. Fix: one combined query
+   per run, a cross-check budget of 2, and a descriptive client name.
+3. **Stack Exchange's exact-phrase search found nothing in a week.** Fix: its looser search,
+   keeping only questions that really use a pain phrase. Its free allowance is per network
+   address and shared, so calls are kept few.
+4. **The cross-check searched for nonsense.** In single-post leads every word appears once, so
+   the tie-break picked words alphabetically ("actual agent assess avoid"). Fix: rank words by
+   use, titles and rarity. Live, the queries became words like "equation inline display toolbar".
+5. **The cross-check was spent on leads that could never be investigated.** Most GitHub hits are
+   one project's feature requests, which the coordinator always rejects. Fix: only leads that
+   pass "on mission" get cross-checked. The live run then attached its first posts.
+6. **One rule had no test that caught it** ("don't cross-check a site the lead was already seen
+   on"). Fix: a test.
+
+### Tests
+
+New in `lib/research/research.test.ts`:
+- parsing each new source, and the Reddit one-request rule;
+- the "seen in 2 places" check, including that forcing can't skip it;
+- a cross-check attaching a matching Stack Overflow question but not an unrelated one, the match
+  staying attached on the next run, and counting toward the check;
+- the GitHub and Reddit call budgets;
+- no cross-checks for off-mission leads, or for sites already seen.
+
+Each rule was deleted in turn to check a test fails.

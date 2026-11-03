@@ -2,9 +2,9 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { testDb, wipe } from "../testing/pglite";
 import type { Db } from "../db";
 import realPosts from "./fixtures/posts-2026-11-03.json";
-import { countRepos, searchGitHub, searchHN, type Fetch, type Post } from "./sources";
+import { countRepos, readDevto, readLobsters, searchGitHub, searchHN, searchReddit, searchStackExchange, type Fetch, type Post } from "./sources";
 import { cluster, fullScore, novelty, partialScore, terms, THRESHOLDS, verdictFor } from "./score";
-import { notInvestigated, onMission, STEP_ESTIMATE_USD, underCap } from "./coordinator";
+import { notInvestigated, onMission, seenTwice, STEP_ESTIMATE_USD, underCap } from "./coordinator";
 import { assemblePack, fence, guardLinks, slugify, uniqueSlug } from "./pack";
 import { costOf, ResearchRefused, type Investigation, type PackDraft, type ResearchModel } from "./model";
 import { daily, investigate, nextOpening, scheduleDrop, watch, write } from "./loop";
@@ -30,8 +30,14 @@ const flaky: Post[] = [
 // One person wanting a watch with a heart-rate sensor: nothing to do with developer tools.
 const offMission: Post = { id: "hn:9", source: "hn", url: "https://news.ycombinator.com/item?id=9", title: "Watches", excerpt: "I wish there was a minimal Casio watch with only heart rate tracking.", author: "ed", engagement: 3, postedAt: hoursAgo(2) };
 
-/** A pretend internet: HN returns `hn` for the first phrase, GitHub returns `gh` for the first phrase. */
-function fakeFetch(hn: Post[], gh: Post[], repos = 0): Fetch & { calls: string[] } {
+const atom = (posts: Post[]) => `<?xml version="1.0"?><feed>${posts.map((p) => `<entry><author><name>/u/${p.author}</name></author><category term="${(p.repo ?? "r/programming").slice(2)}" /><content type="html">${p.excerpt.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</content><id>t3_${p.id.slice(3)}</id><link href="${p.url}" /><updated>${p.postedAt}</updated><published>${p.postedAt}</published><title>${p.title}</title></entry>`).join("")}</feed>`;
+const seItems = (posts: Post[]) => ({ items: posts.map((p) => ({ question_id: Number(p.id.split(":").pop()), title: p.title, body: `<p>${p.excerpt}</p>`, link: p.url, creation_date: Math.floor(Date.parse(p.postedAt) / 1000), score: p.engagement, answer_count: 0, owner: { display_name: p.author } })) });
+
+/**
+ * A pretend internet: HN and GitHub return their posts for the first pain phrase only; Stack
+ * Overflow returns `so` and Reddit returns `rd` for every search; dev.to and Lobsters are empty.
+ */
+function fakeFetch(hn: Post[], gh: Post[], repos = 0, so: Post[] = [], rd: Post[] = []): Fetch & { calls: string[] } {
   const calls: string[] = [];
   const f = (async (url: string) => {
     calls.push(url);
@@ -45,6 +51,9 @@ function fakeFetch(hn: Post[], gh: Post[], repos = 0): Fetch & { calls: string[]
       return Response.json({ items });
     }
     if (url.startsWith("https://api.github.com/search/repositories")) return Response.json({ total_count: repos });
+    if (url.startsWith("https://api.stackexchange.com/")) return Response.json(seItems(so));
+    if (url.startsWith("https://www.reddit.com/")) return new Response(atom(rd), { headers: { "content-type": "application/atom+xml" } });
+    if (url.startsWith("https://dev.to/") || url.startsWith("https://lobste.rs/")) return Response.json([]);
     return new Response("not found", { status: 404 });
   }) as Fetch & { calls: string[] };
   f.calls = calls;
@@ -105,6 +114,36 @@ describe("sources", () => {
     ] });
     expect(await searchGitHub("q", new Date(hoursAgo(168)), f)).toEqual([expect.objectContaining({ id: "gh:acme/ci#7", repo: "acme/ci", engagement: 5 })]);
   });
+  it("Stack Overflow: keeps only questions that use a pain phrase (the watch), or all of them (the cross-check)", async () => {
+    const qs: Post[] = [
+      { id: "so:stackoverflow:1", source: "stackoverflow", url: "https://stackoverflow.com/q/1", title: "Is there a tool that finds flaky tests?", excerpt: "In our CI pipeline.", author: "x", engagement: 3, postedAt: hoursAgo(5) },
+      { id: "so:stackoverflow:2", source: "stackoverflow", url: "https://stackoverflow.com/q/2", title: "Python list sort", excerpt: "How do I sort a list?", author: "y", engagement: 1, postedAt: hoursAgo(6) },
+    ];
+    const f: Fetch = async () => Response.json(seItems(qs));
+    expect((await searchStackExchange("is there a tool", new Date(hoursAgo(168)), "stackoverflow", f)).map((p) => p.id)).toEqual(["so:stackoverflow:1"]);
+    expect(await searchStackExchange("flaky tests ci", new Date(hoursAgo(168)), "stackoverflow", f, null)).toHaveLength(2);
+  });
+  it("Reddit: reads the search feed, all phrases in one request (Reddit throttles)", async () => {
+    const calls: string[] = [];
+    const post: Post = { id: "rd:abc", source: "reddit", url: "https://www.reddit.com/r/devops/comments/abc/x/", title: "Flaky CI", excerpt: "I wish there was a <b>tool</b>", author: "zed", repo: "r/devops", engagement: 0, postedAt: hoursAgo(3) };
+    const f: Fetch = async (u) => { calls.push(u); return new Response(atom([post, { ...post, id: "rd:old", postedAt: hoursAgo(24 * 30) }])); };
+    const got = await searchReddit(["wish there was", "would pay for"], new Date(hoursAgo(168)), f);
+    expect(calls).toHaveLength(1);
+    expect(decodeURIComponent(calls[0])).toContain('"wish there was" OR "would pay for"');
+    expect(got).toEqual([expect.objectContaining({ id: "rd:abc", author: "zed", repo: "r/devops", url: post.url, excerpt: "I wish there was a tool" })]);
+  });
+  it("dev.to and Lobsters: recent posts, only those using a phrase", async () => {
+    const dev: Fetch = async () => Response.json([
+      { id: 1, title: "Someone should build a better log viewer", description: "", url: "https://dev.to/a/1", published_at: hoursAgo(2), user: { username: "a" } },
+      { id: 2, title: "My week", description: "nothing", url: "https://dev.to/b/2", published_at: hoursAgo(2), user: { username: "b" } },
+    ]);
+    expect((await readDevto(["someone should build"], new Date(hoursAgo(168)), dev)).map((p) => p.id)).toEqual(["dt:1"]);
+    const lob: Fetch = async () => Response.json([
+      { short_id: "k1", title: "Why is there no good diff tool for SQL?", comments_url: "https://lobste.rs/s/k1", created_at: hoursAgo(1), submitter_user: "c" },
+      { short_id: "k2", title: "Rust 2.0", comments_url: "https://lobste.rs/s/k2", created_at: hoursAgo(1), submitter_user: "d" },
+    ]);
+    expect((await readLobsters(["why is there no"], new Date(hoursAgo(168)), lob)).map((p) => p.id)).toEqual(["lb:k1"]);
+  });
   it("a source that answers with an error throws, so watch can report it", async () => {
     const down: Fetch = async () => new Response("rate limited", { status: 403 });
     await expect(searchGitHub("q", new Date(), down)).rejects.toThrow("github 403");
@@ -128,7 +167,8 @@ describe("free scoring", () => {
     const c = cluster(flaky)[0];
     const p = partialScore(c, NOW);
     expect(p.velocity).toMatchObject({ points: 20, inputs: { postsLast48h: 4 } });
-    expect(p.sources).toMatchObject({ points: 20, inputs: { people: 4, platforms: 2 } });
+    // 2 sites of the 3 that give full marks, and 4 people: 20 × (0.6 × 1/2 + 0.4 × 1) = 14.
+    expect(p.sources).toMatchObject({ points: 14, inputs: { places: 2, people: 4 } });
     expect(p.size.points).toBeCloseTo(20 * Math.log10(1 + 275) / 3, 0);
     expect(p.pain.points).toBe(20);
     expect(novelty(0).points).toBe(20);
@@ -141,9 +181,9 @@ describe("free scoring", () => {
     expect(s.sources.points).toBe(0);
     expect(s.verdict).toBe("IGNORE");
   });
-  it("thresholds: under 40 ignore, 40 to 59 watch, 60 and up investigate", () => {
-    expect([39, 40, 59, 60, 100].map(verdictFor)).toEqual(["IGNORE", "WATCH", "WATCH", "INVESTIGATE", "INVESTIGATE"]);
-    expect(THRESHOLDS).toEqual({ WATCH: 40, INVESTIGATE: 60 });
+  it("thresholds: under 25 ignore, 25 to 39 watch, 40 and up investigate", () => {
+    expect([24, 25, 39, 40, 100].map(verdictFor)).toEqual(["IGNORE", "WATCH", "WATCH", "INVESTIGATE", "INVESTIGATE"]);
+    expect(THRESHOLDS).toEqual({ WATCH: 25, INVESTIGATE: 40 });
   });
   it("on a real week of posts (3 Nov 2026): every score is 0 to 100 and adds up", () => {
     for (const c of cluster(realPosts as Post[])) {
@@ -157,6 +197,10 @@ describe("free scoring", () => {
 });
 
 describe("coordinator checks", () => {
+  it("seen in 2 places: one site isn't enough", () => {
+    expect(seenTwice(["hn"])).toMatchObject({ ok: false });
+    expect(seenTwice(["hn", "stackoverflow"])).toMatchObject({ ok: true, why: "seen on hn, stackoverflow" });
+  });
   it("on mission needs developer words", () => {
     expect(onMission("flaky tests in our CI pipeline", [], 1).ok).toBe(true);
     expect(onMission("a minimal watch with heart rate", [], 1)).toMatchObject({ ok: false });
@@ -224,35 +268,74 @@ describe("the loop", () => {
   it("watch: saves posts, groups and scores them, and only spends free lookups", async () => {
     const d = deps();
     const r = await watch(d);
-    expect(r).toMatchObject({ fetched: { hn: 2, github: 2 }, errors: [], leads: 1, investigate: 1 });
+    expect(r).toMatchObject({ fetched: { hn: 2, github: 2, stackoverflow: 0, reddit: 0, devto: 0, lobsters: 0 }, errors: [], leads: 1, investigate: 1, crossChecked: 1 });
     const [lead] = await researchStore(db).leads();
     expect(lead).toMatchObject({ verdict: "INVESTIGATE", status: "new" });
     expect(lead.score.novelty.inputs.reposFound).toBe(0);
     expect(d.model.calls).toEqual([]);
+    // Seen on HN and GitHub already: the cross-check only asks the other sites.
+    const cross = (d.fetch as ReturnType<typeof fakeFetch>).calls.filter((u) => /hn\.algolia|search\/issues/.test(u) && !u.includes("%22"));
+    expect(cross).toEqual([]);
   });
 
-  it("free repo lookups: none for a weak lead, at most 4 a run however many strong ones", async () => {
+  it("free repo lookups: none for a weak lead, at most 3 a run however many strong ones", async () => {
     const weak = deps({ fetch: fakeFetch([offMission], []) });
     await watch(weak);
     expect((weak.fetch as ReturnType<typeof fakeFetch>).calls.filter((u) => u.includes("search/repositories"))).toEqual([]);
+    // Off mission, so it can never be investigated: no cross-check searches spent on it either.
+    expect((weak.fetch as ReturnType<typeof fakeFetch>).calls.filter((u) => u.startsWith("https://api.stackexchange.com/") && !u.includes("q=is%20there") && !u.includes("q=wish"))).toEqual([]);
 
     await wipe(db);
     const topics = ["kafka", "grafana", "prisma", "webpack", "jenkins", "redis"];
+    const dev = [["api", "cli"], ["docker", "sql"], ["git", "deploy"], ["npm", "debug"], ["terraform", "schema"], ["webhook", "yaml"]];
     const strong: Post[] = topics.flatMap((t, i) => [0, 1, 2].map((j) => ({
       id: `hn:${100 + i * 10 + j}`, source: "hn" as const, url: `https://news.ycombinator.com/item?id=${100 + i * 10 + j}`, title: `${t} ${t}x ${t}y`,
-      excerpt: `I wish there was a ${t} ${t}x ${t}y ${t}z. Painful and tedious, we waste hours.`, author: `${t}${j}`, engagement: 200, postedAt: hoursAgo(3 + j),
+      excerpt: `I wish there was a ${t} ${t}x ${t}y ${t}z for ${dev[i][0]} and ${dev[i][1]}. Painful and tedious, we waste hours.`, author: `${t}${j}`, engagement: 200, postedAt: hoursAgo(3 + j),
     })));
     const many = deps({ fetch: fakeFetch(strong, []) });
     const r = await watch(many);
     expect(r.leads).toBe(6);
-    expect((many.fetch as ReturnType<typeof fakeFetch>).calls.filter((u) => u.includes("search/repositories"))).toHaveLength(4);
+    const calls = (many.fetch as ReturnType<typeof fakeFetch>).calls;
+    expect(calls.filter((u) => u.includes("search/repositories"))).toHaveLength(3);
+    // GitHub's 10 searches a minute: 5 phrases + 3 repo counts + at most 2 cross-checks.
+    expect(calls.filter((u) => u.startsWith("https://api.github.com/search/"))).toHaveLength(10);
+    // Reddit: 1 watch query + at most 2 cross-checks.
+    expect(calls.filter((u) => u.startsWith("https://www.reddit.com/"))).toHaveLength(3);
   });
 
   it("a source being down is reported, and the rest still runs", async () => {
     const d = deps({ fetch: (async (u: string) => (u.includes("algolia") ? new Response("", { status: 500 }) : fakeFetch([], flaky.filter((p) => p.source === "github"))(u))) as Fetch });
     const r = await watch(d);
-    expect(r.errors.length).toBe(5);
+    expect(r.errors.filter((e) => e.includes("hn 500")).length).toBeGreaterThanOrEqual(5);
+    expect(r.errors.every((e) => e.includes("hn 500"))).toBe(true);
     expect(r.fetched.github).toBe(2);
+  });
+
+  it("cross-check: a lead seen only on HN is looked up on Stack Overflow, and a matching question joins it", async () => {
+    const hnOnly = flaky.filter((p) => p.source === "hn");
+    const match: Post = { id: "so:stackoverflow:77", source: "stackoverflow", url: "https://stackoverflow.com/q/77", title: "Quarantine flaky tests in a CI pipeline?", excerpt: "Our CI pipeline reruns flaky tests and builds. How do we track them?", author: "sam", engagement: 4, postedAt: hoursAgo(50) };
+    const unrelated: Post = { id: "so:stackoverflow:78", source: "stackoverflow", url: "https://stackoverflow.com/q/78", title: "Python list sort", excerpt: "How do I sort a list of tuples?", author: "kim", engagement: 1, postedAt: hoursAgo(50) };
+    const d = deps({ fetch: fakeFetch(hnOnly, [], 0, [match, unrelated]) });
+    const r = await watch(d);
+    expect(r.crossFound).toBe(1);
+    const [lead] = await researchStore(db).leads();
+    expect(lead.crossIds).toEqual(["so:stackoverflow:77"]);
+    expect(lead.score.sources.inputs.places).toBe(2);
+    // It stays attached on the next run, even when the cross-check finds nothing new.
+    await watch(deps({ fetch: fakeFetch(hnOnly, []) }));
+    expect((await researchStore(db).lead(lead.id))!.crossIds).toEqual(["so:stackoverflow:77"]);
+    // And it counts for the "seen in 2 places" check.
+    expect((await investigate(d, lead.id)).ok).toBe(true);
+  });
+
+  it("a lead seen on one site only is never investigated, even by hand", async () => {
+    const d = deps({ fetch: fakeFetch(flaky.filter((p) => p.source === "hn"), []) });
+    await watch(d);
+    const [lead] = await researchStore(db).leads();
+    const r = await investigate(d, lead.id, { force: true });
+    expect(r).toMatchObject({ ok: false });
+    expect(!r.ok && r.checks?.seenTwice.ok).toBe(false);
+    expect(d.model.calls).toEqual([]);
   });
 
   it("investigate: checks pass, the model runs once, the cost is recorded", async () => {

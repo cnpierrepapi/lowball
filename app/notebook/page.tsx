@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { copy } from "@/lib/copy";
 import { notebook } from "@/lib/research/view";
+import { SOURCE_NAMES, type Source } from "@/lib/research/sources";
 
 // Her research, in the open: every score with its parts and inputs, every check with its
 // reason, and links to the real posts.
@@ -42,6 +43,7 @@ async function Entries() {
               </p>
             </div>
             <p className="mt-1 text-sm text-[#151311]/70">{n.status[l.status]} · {l.terms.slice(0, 6).join(", ")}</p>
+            <p className="text-sm font-semibold">{n.seenOn([...new Set(l.posts.map((p) => SOURCE_NAMES[p.source as Source]))].join(", "))}</p>
 
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[520px] text-left text-sm">
@@ -62,8 +64,8 @@ async function Entries() {
             </div>
 
             {l.checks && (
-              <ul className="mt-3 grid gap-1 text-sm sm:grid-cols-3">
-                {(["onMission", "notInvestigated", "underCap"] as const).map((k) => (
+              <ul className="mt-3 grid gap-1 text-sm sm:grid-cols-2">
+                {(["onMission", "seenTwice", "notInvestigated", "underCap"] as const).filter((k) => l.checks![k]).map((k) => (
                   <li key={k} className={`rounded-lg px-2 py-1 ${l.checks![k].ok ? "bg-[#d6f5e6]" : "bg-[#ffe1d6]"}`}>
                     <span className="font-bold">{l.checks![k].ok ? "✓" : "✗"} {n.checks[k]}</span>
                     <span className="block text-xs">{l.checks![k].why}</span>
@@ -98,7 +100,10 @@ async function Entries() {
                 {l.posts.map((p) => (
                   <li key={p.id}>
                     <a href={p.url} target="_blank" rel="noreferrer nofollow" className="font-semibold underline">{p.title}</a>
-                    <span className="ml-1 font-mono text-xs text-[#151311]/60">{p.source === "hn" ? "HN" : p.repo} · {p.postedAt.slice(0, 10)}</span>
+                    <span className="ml-1 font-mono text-xs text-[#151311]/60">
+                      {SOURCE_NAMES[p.source as Source]}{p.repo ? ` ${p.repo}` : ""} · {p.postedAt.slice(0, 10)}
+                      {l.crossIds.includes(p.id) && <span className="ml-1 rounded bg-[#f2b544] px-1 text-[#151311]">{n.crossChecked}</span>}
+                    </span>
                     <p className="text-[#151311]/70">{p.excerpt}</p>
                   </li>
                 ))}
