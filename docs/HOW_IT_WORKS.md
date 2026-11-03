@@ -790,3 +790,14 @@ only those leads use, but never a post that a remaining lead still uses.
 - the dashboard action needs the login.
 
 Each rule was checked by deleting it.
+
+**Bug found on the first live clear (3 Nov).** The clear deleted 224 leads and 197 posts, but some
+non-Solana leads stayed, such as "Check that the Store build finds the data of the portable build",
+scoring 78. The Solana word list included everyday programming words ("program", "token",
+"transaction", "wallet", "rpc", "swap", "mint"), so any post using them counted as Solana. The same
+list decides "on mission" before money is spent, so this mattered beyond the notebook.
+
+**Fix:** a lead needs at least one word that only appears in Solana or crypto talk, such as solana,
+anchor, spl, lamports, pda, devnet, a program's name, usdc or x402. The everyday words still count
+toward "2 developer words", but never make a lead Solana on their own. Tests cover both the mission
+check and the clear; putting "program" back on the list fails them.

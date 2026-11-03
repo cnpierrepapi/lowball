@@ -1,13 +1,22 @@
 // The coordinator: checks that run before any money is spent on a lead. All free, all shown on
 // the notebook page with their reasons.
 
-/** The mission: tools for developers building on Solana. A lead needs one of these... */
+/**
+ * The mission: tools for developers building on Solana. A lead needs one of these words, which
+ * only show up when the talk is about Solana or crypto...
+ */
 export const CRYPTO_WORDS = [
   "solana", "anchor", "spl", "lamport", "lamports", "pda", "cpi", "idl", "devnet", "mainnet", "testnet", "validator", "validators",
-  "rpc", "wallet", "wallets", "phantom", "jupiter", "raydium", "orca", "meteora", "metaplex", "jito", "pump", "helius", "agave",
-  "blockhash", "keypair", "pubkey", "onchain", "on-chain", "blockchain", "crypto", "defi", "nft", "nfts", "mint", "usdc", "swap",
-  "slippage", "transaction", "transactions", "program", "programs", "x402", "web3", "token", "tokens",
+  "phantom", "jupiter", "raydium", "orca", "meteora", "metaplex", "jito", "pump.fun", "helius", "agave", "blockhash", "keypair",
+  "pubkey", "onchain", "on-chain", "blockchain", "crypto", "defi", "nft", "nfts", "usdc", "slippage", "x402", "web3",
 ];
+
+/**
+ * ...these everyday words count toward the 2, but never make a lead Solana on their own: they
+ * turn up in ordinary programming talk too (the first clear, 3 Nov, kept "Check that the Store
+ * build finds the data" because it said "program").
+ */
+export const CHAIN_WORDS = ["rpc", "wallet", "wallets", "mint", "swap", "transaction", "transactions", "program", "programs", "token", "tokens"];
 
 /** ...and, with it, at least 2 words from either list. */
 export const DEV_WORDS = [
@@ -55,7 +64,7 @@ export const ownerOf = (repo: string) => repo.split("/")[0].toLowerCase();
 export function onMission(text: string, repos: string[], postCount: number): Check {
   const words = new Set(text.toLowerCase().match(/[a-z0-9+#.-]+/g) ?? []);
   const crypto = CRYPTO_WORDS.filter((w) => words.has(w));
-  const dev = DEV_WORDS.filter((w) => words.has(w) && !crypto.includes(w));
+  const dev = [...CHAIN_WORDS, ...DEV_WORDS].filter((w, i, all) => words.has(w) && !crypto.includes(w) && all.indexOf(w) === i);
   if (crypto.length === 0) return { ok: false, why: "nothing about Solana or crypto" };
   if (crypto.length + dev.length < 2) return { ok: false, why: `only 1 developer word (${crypto[0]}); needs 2` };
   const ghRepos = repos.filter((r) => r.includes("/"));

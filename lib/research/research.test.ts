@@ -297,6 +297,11 @@ describe("coordinator checks", () => {
     expect(seenTwice(["hn", "stackoverflow"], 1)).toMatchObject({ ok: true, why: "seen on hn, stackoverflow" });
     expect(seenTwice(["stackoverflow"], 2)).toMatchObject({ ok: true, why: "2 different people asked, on stackoverflow" });
   });
+  it("everyday words like program, token or wallet don't make a lead Solana on their own", () => {
+    expect(onMission("Check that the Store build finds the data of the portable build program", [], 1)).toMatchObject({ ok: false, why: "nothing about Solana or crypto" });
+    expect(onMission("token wallet transaction rpc swap mint", [], 1)).toMatchObject({ ok: false });
+    expect(onMission("a solana program", [], 1).ok).toBe(true); // they still count toward the 2 words
+  });
   it("on mission: Solana developer tools", () => {
     expect(onMission("flaky tests in our Solana program CI pipeline", [], 1).ok).toBe(true);
     expect(onMission("flaky tests in our CI pipeline", [], 1)).toMatchObject({ ok: false, why: "nothing about Solana or crypto" });
@@ -696,6 +701,12 @@ describe("the loop", () => {
     // The next watch (sources now quiet) doesn't bring it back.
     await watch(deps({ fetch: fakeFetch([], []) }));
     expect((await store.leads()).map((l) => l.id)).not.toContain("hn:70");
+  });
+
+  it("clearing treats a lead that only says program or token as non-Solana", async () => {
+    await db.query("INSERT INTO posts (id, source, url, title, excerpt, author, engagement, posted_at, seen_at) VALUES ('gh:x/y#1', 'github', 'u', 'Check that the Store build finds the data', 'the portable build program reads a token', 'x', 0, now(), now())");
+    await db.query("INSERT INTO leads (id, title, terms, post_ids, score, total, verdict, first_seen, updated_at) VALUES ('gh:x/y#1', 't', '{}', '{gh:x/y#1}', '{}'::jsonb, 78, 'INVESTIGATE', now(), now())");
+    expect(await researchStore(db).clearOffMission()).toEqual({ leads: 1, posts: 1 });
   });
 
   it("clearing never deletes a post a remaining lead still uses", async () => {
