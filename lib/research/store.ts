@@ -13,6 +13,7 @@ export interface Lead {
   title: string;
   terms: string[];
   postIds: string[];
+  crossIds: string[]; // posts the cross-check found on other sites
   score: Score;
   total: number;
   verdict: Verdict;
@@ -28,7 +29,7 @@ const json = <T,>(v: unknown): T => (typeof v === "string" ? JSON.parse(v) : v) 
 
 function leadFrom(r: Record<string, unknown>): Lead {
   return {
-    id: String(r.id), title: String(r.title), terms: r.terms as string[], postIds: r.post_ids as string[],
+    id: String(r.id), title: String(r.title), terms: r.terms as string[], postIds: r.post_ids as string[], crossIds: (r.cross_ids as string[] | null) ?? [],
     score: json<Score>(r.score), total: Number(r.total), verdict: r.verdict as Verdict, status: r.status as LeadStatus,
     checks: r.checks == null ? null : json(r.checks), investigation: r.investigation == null ? null : json(r.investigation),
     packId: (r.pack_id as string) ?? null,
@@ -46,19 +47,27 @@ function postFrom(r: Record<string, unknown>): Post {
 
 export function researchStore(db: Db) {
   return {
-    async savePosts(posts: Post[], now: Date): Promise<void> {
+    /** Saves posts. foundBy says how: the daily watch, or the cross-check for a lead (kept from the first time). */
+    async savePosts(posts: Post[], now: Date, foundBy: "watch" | "crossref" = "watch"): Promise<void> {
       for (const p of posts) {
         await db.query(
-          `INSERT INTO posts (id, source, url, title, excerpt, author, repo, engagement, posted_at, seen_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          `INSERT INTO posts (id, source, url, title, excerpt, author, repo, engagement, posted_at, seen_at, found_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            ON CONFLICT (id) DO UPDATE SET engagement = EXCLUDED.engagement, seen_at = EXCLUDED.seen_at`,
-          [p.id, p.source, p.url, p.title, p.excerpt, p.author, p.repo ?? null, p.engagement, p.postedAt, now],
+          [p.id, p.source, p.url, p.title, p.excerpt, p.author, p.repo ?? null, p.engagement, p.postedAt, now, foundBy],
         );
       }
     },
 
+    /** Posts the watch found since `since` (cross-check finds stay with the lead they were found for). */
     async postsSince(since: Date): Promise<Post[]> {
-      return (await db.query("SELECT * FROM posts WHERE posted_at >= $1 ORDER BY posted_at", [since])).map(postFrom);
+      return (await db.query("SELECT * FROM posts WHERE posted_at >= $1 AND found_by = 'watch' ORDER BY posted_at", [since])).map(postFrom);
+    },
+
+    /** The cross-check posts already attached to these leads. */
+    async crossIds(leadIds: string[]): Promise<Map<string, string[]>> {
+      const rows = await db.query<{ id: string; cross_ids: string[] }>("SELECT id, cross_ids FROM leads WHERE id = ANY($1::text[])", [leadIds]);
+      return new Map(rows.map((r) => [r.id, r.cross_ids ?? []]));
     },
 
     async postsByIds(ids: string[]): Promise<Post[]> {
@@ -66,13 +75,14 @@ export function researchStore(db: Db) {
     },
 
     /** New leads start as 'new'; a known lead gets its posts and score refreshed, keeping what was done with it. */
-    async upsertLead(l: { id: string; title: string; terms: string[]; postIds: string[]; score: Score }, now: Date): Promise<void> {
+    async upsertLead(l: { id: string; title: string; terms: string[]; postIds: string[]; crossIds?: string[]; score: Score }, now: Date): Promise<void> {
       await db.query(
-        `INSERT INTO leads (id, title, terms, post_ids, score, total, verdict, first_seen, updated_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $8)
+        `INSERT INTO leads (id, title, terms, post_ids, cross_ids, score, total, verdict, first_seen, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $9)
          ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, terms = EXCLUDED.terms, post_ids = EXCLUDED.post_ids,
-           score = EXCLUDED.score, total = EXCLUDED.total, verdict = EXCLUDED.verdict, updated_at = EXCLUDED.updated_at`,
-        [l.id, l.title, l.terms, l.postIds, JSON.stringify(l.score), l.score.total, l.score.verdict, now],
+           cross_ids = EXCLUDED.cross_ids, score = EXCLUDED.score, total = EXCLUDED.total, verdict = EXCLUDED.verdict,
+           updated_at = EXCLUDED.updated_at`,
+        [l.id, l.title, l.terms, l.postIds, l.crossIds ?? [], JSON.stringify(l.score), l.score.total, l.score.verdict, now],
       );
     },
 
