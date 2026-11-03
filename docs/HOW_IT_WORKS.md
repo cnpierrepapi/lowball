@@ -319,3 +319,214 @@ found four rules with no test that caught them; see the bugs below.
    Fix: the allowlist now adds `db/`, `vercel.json` and `scripts/migrate.mts` only (the rest of
    `scripts/` stays local). To prove it, I copied only the files the allowlist lets through into
    an empty folder, then ran a clean `npm ci` and `npm run build` there. Both passed.
+
+## Build packs, drops and auctions
+
+### What it does
+
+She doesn't sell an ebook any more. She sells **build packs**: the write-up of a tool that
+developers keep asking for and nobody has built. Each pack is sold as a **drop**: a few copies
+(5 by default), on sale between an opening time and a closing time. Once they're gone, they're
+gone.
+
+- **The free part (the teaser):** the problem, links to the real posts where developers asked for
+  it, and what already exists. Anyone can read it on the pack's page.
+- **The paid part:** the plan, a build prompt you paste into an AI coding tool, the tests that
+  prove it works, and the risks.
+
+### Who decides the numbers
+
+The engine, from the pack, never the model (`lib/engine/drops.ts`):
+- List price = 1.50 USDC + 1 cent per point of the pack's research score (0 to 100), so between
+  1.50 and 2.50.
+- Her secret floor = 55% of list.
+- As copies go, the floor climbs evenly, until it's halfway between floor and list for the last
+  copy. If the floor rises mid-haggle, her ask is lifted to it.
+- Drops are cash only. Asking about friends just keeps her talking price.
+
+### Selling the copies without overselling
+
+When a buyer shakes hands, the server sets a copy aside for them (a **hold**) before it signs the
+offer. A hold lasts 8 minutes: the 5 minutes the offer is good for, plus the 2 minutes a payment
+can take to settle, plus a minute of slack. One SQL statement under a lock checks that held plus
+sold copies are fewer than the total, so two buyers chasing the last copy can't both get it. The
+loser hears "That one's gone. Someone beat you to it." and gets no offer, so no payment is ever
+asked for a copy that doesn't exist.
+
+When a hold's time is up, the server asks the chain whether that offer was paid (the receipt the
+payment route already writes):
+- paid: the copy is marked **sold**;
+- not paid: it goes back on the shelf;
+- the chain can't be asked: it stays taken, so nothing is ever oversold.
+
+### What changed in the payment route (agreed on 3 Nov)
+
+Packs live in the database, so the payment route looks items up with `itemById` instead of the
+fixed list in the code: four lookups, nothing else. The price still comes only from the signed
+offer.
+
+### The old ebook
+
+It's off the shelf: nobody can start a new haggle for it. Old receipts still open, and friends'
+links for pledges that are still open still work.
+
+### Pages
+
+- `/`: what she does, the shelf of drops, the email box.
+- `/pack/[id]`: the free part, the drop's state, the counter.
+- `/notebook`: her research.
+- `/admin`: the back office.
+- `/read`: a bought pack in full.
+
+The shopkeeper scene (three.js, about 560 KB) now loads after the words, on every page.
+
+## The research loop and her notebook
+
+### What it does
+
+Every day she reads Hacker News and GitHub for developers saying things like "wish there was",
+"is there a tool", "someone should build", "would pay for" and "why is there no". She groups
+posts about the same missing tool into **leads** and scores them for free. Only when a lead passes
+her checks does she spend money: first to look into it with web search, then to write the pack.
+Then she puts the pack on the shelf and schedules its drop, and the drop email goes to confirmed
+subscribers.
+
+### Step by step (`lib/research/`)
+
+1. **Watch (free).** Five short phrases are searched on each source over the last 7 days. Both
+   sources were tested live on 3 Nov. Each source is a small function over `fetch`, so tests feed
+   it recorded answers. Posts are saved in `posts`.
+2. **Group (free).** Posts from the last 14 days are grouped. A post joins a group when it shares
+   at least 3 topic words, and a fifth of its words, with a post already in the group. A lead's id
+   is its oldest post, so it stays the same between runs.
+3. **Score (free).** Five parts, 0 to 20 each, 100 in all. The notebook shows each part with its
+   inputs and its rule:
+   - Velocity: 20 × min(1, posts in the last 48 hours ÷ 3).
+   - Sources: 20 × (0.75 × min(1, (different people − 1) ÷ 3) + 0.25 if it's on both HN and
+     GitHub).
+   - Size: 20 × min(1, log10(1 + points and comments) ÷ 3).
+   - Pain: 20 × min(1, different pain phrases ÷ 4).
+   - Novelty: 20 × (1 − min(1, log10(1 + matching GitHub repos) ÷ 4)). The repo count is a free
+     GitHub search, done for at most 4 promising leads a run. A lead that wasn't checked gets 10.
+
+   Under 40 is IGNORE, 40 to 59 is WATCH, 60 and up is INVESTIGATE.
+4. **Coordinator checks (free), before any money is spent:**
+   - On mission: at least 2 developer words, and not a list of issues all on one project (that's
+     a feature request, not a missing tool).
+   - Not done before: the same lead, or one sharing half its words, wasn't investigated in the
+     last 30 days. A lead that was already worked on is never investigated again.
+   - Under budget: what's been spent this month, plus the most the next step can cost ($0.60 to
+     investigate, $0.50 to write), must stay under the monthly cap ($5 by default, set on the
+     dashboard).
+5. **Investigate (paid).** Claude Opus 5.5 with web search (`web_search_20260209`, at most 5
+   searches) checks whether the tool exists, who tried, and how big the need is. A long search
+   that pauses is carried on, at most 3 times. The notes are then put into a fixed shape that is
+   checked against a schema. The real cost is recorded from the reply's usage figures: $4 per
+   million input tokens, $20 per million output tokens, and $10 per 1,000 searches.
+   - If the tool already exists, or the verdict is skip, the lead is closed and no pack is written.
+   - If the model declines, the lead is marked failed.
+   - A timeout or network error leaves the lead as it was, to try again.
+6. **Write (paid).** Opus writes the pack's fields. The server then puts the pack together:
+   - the links to the real posts come from our own data, never from the model;
+   - any other link the model writes is removed, unless it came from the web search;
+   - the build prompt sits in a code block it can't break out of;
+   - the pack id is a lowercase slug of 32 characters or fewer, because the onchain receipt
+     holds 32 bytes.
+7. **On the shelf.** The pack gets its fingerprint (sha256), and the drop is scheduled. It opens at
+   18:00 UTC, at least 12 hours ahead, with 5 copies for 48 hours. The drop email goes out when
+   the drop is scheduled. Automatic drops can be turned off on the dashboard.
+8. **Onchain fingerprint.** `lib/research/onchain.ts` is where the pack's hash goes onchain. It
+   does nothing until the Solana program gets a new instruction, which needs a program upgrade
+   from a local machine. The notebook says "not onchain yet" until then.
+
+**When it runs:** Vercel calls `/api/cron/research` once a day (watch, then at most one
+investigation and one pack). The dashboard can run each step by hand, including "Investigate
+anyway" for a WATCH lead. That runs every check except the score threshold, and is marked in the
+notebook.
+
+### The admin dashboard (`/admin`)
+
+**Logging in:**
+- There's no password in the code, because the repo is public.
+- The first visit sets the password. Only a slow scrambled version (scrypt) is stored, in the
+  database. A second set is refused by the database itself.
+- Logins are limited to 5 a minute per IP, and a login lasts 12 hours, in an HttpOnly, Secure,
+  same-site cookie.
+- Posts from other sites are refused.
+
+**What it does:**
+- Schedule a drop: preview the email and how many confirmed addresses get it, then confirm.
+- Cancel a drop that hasn't opened.
+- List packs with their fingerprint.
+- Mail: counts, sent today against the cap, a switch for real sending (refused if the Zoho
+  settings are missing), and "send what's waiting".
+- Research: what's been spent against the cap, the cap itself, the automatic-drop switch, and each
+  research step.
+
+### What could break it
+
+- **Few INVESTIGATE leads.** On a real week of posts (3 Nov), nothing scored past 29. The same need
+  shows up over weeks, so scores grow as posts collect over the 14 days. Until then, "Investigate
+  anyway" on a WATCH lead is how the first pack gets made.
+- **Rate limits.** GitHub allows 10 searches a minute without a key. A run makes up to 9 (5
+  phrases plus 4 repo counts). If GitHub says no, it's reported and the rest carries on.
+- **Time limits.** Research can take minutes. The research routes may run up to 5 minutes; if the
+  Vercel plan cuts that short, the step fails and the lead stays as it was.
+- **Previews share the live database.** Packs, drops and the admin password made on a preview are
+  live too.
+- **Not proven here.** The real model calls can't run in this session, which has no API key. They
+  are tested with a fake model; the real ones only run on Vercel.
+
+### Bugs hit while building it, and the fixes
+
+1. **Hacker News returned nothing.** The date filter's `>` has to be encoded (`%3E`); sent bare,
+   HN silently matched nothing. Long exact phrases also almost never match ("I wish there was a
+   tool" had 37 hits ever). Fix: the filter is encoded, there's a test for it, and the phrases are
+   short.
+2. **Node's fetch ignored this session's proxy.** That only affected the live test here, not
+   Vercel. Fix: the live test runs with `NODE_USE_ENV_PROXY=1`.
+3. **Pain words glued unrelated posts together.** "Painful", "tedious" and "hours" were counted as
+   topic words, so six posts about six different tools became one lead. Fix: pain words count
+   toward the pain score only, never toward grouping. A test with six topics proves it.
+4. **Two rules had no test that caught them.** "Never investigate a lead twice" was hidden behind
+   the 30-day check, and nothing tested the 4-lookup limit. Fix: tests for both.
+5. **The admin page wouldn't build.** It read the clock while the page was being pre-built, which
+   this Next version refuses. Fix: the default opening time is filled in when a pack is picked.
+6. **The friend-link page would have pulled database code into the browser,** through the item
+   list. Fix: the old book's public details live in `lib/oldbook.ts`, which has no server code.
+7. **Payment library imports broke the route tests.** `@x402/next` imports `next/server` in a way
+   plain Node can't resolve. Fix: vitest processes that one package itself.
+
+### Tests
+
+- `lib/engine/drops.test.ts`: the price rule, the floor's climb, the drop phases, and cash only
+  (3,000 random haggles, no friends deal ever).
+- `lib/shop/shop.test.ts`, on real Postgres:
+  - holds never exceed copies, and only while the drop is open;
+  - unpaid holds come back, paid ones are sold, and if the chain is down nothing is released;
+  - races for the last copy;
+  - one drop per pack, and the onchain hook.
+- `app/api/haggle/drops.test.ts`, through the real route:
+  - not open yet, sold out, beaten to it;
+  - two handshakes at once for the last copy;
+  - the floor rises;
+  - no friends deal;
+  - the old book only through a friend's link.
+- `lib/research/research.test.ts`:
+  - the sources against recorded answers, including the encoding bug;
+  - every score part's rule, and a real week of posts;
+  - every coordinator check, link stripping and the code fence;
+  - the cost maths;
+  - the whole loop with a fake model: no spend when a check fails, skip when it exists, refusals
+    and network errors, the pack and its drop and email, automatic drop off, and the daily run.
+- `app/api/admin/admin.test.ts`:
+  - the first-visit password, the scrambled storage, the slowdown;
+  - the cookie gate, forged cookies and other sites' posts;
+  - the 12-hour login;
+  - preview and scheduling (emails to confirmed addresses only);
+  - the settings limits;
+  - the research cron's lock.
+
+As before, each rule was deleted in turn to check a test fails. The one rule no test catches on
+its own is the password's set-once guard in `lib/admin.ts`. The database's set-once write enforces
+the same thing, and that write has its own test.

@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import type { TransactionSigner } from "@solana/kit";
 import type { Wallet as StdWallet } from "@wallet-standard/base";
-import { Keeper } from "@/components/keeper/Keeper";
+import { LazyKeeper as Keeper } from "@/components/keeper/LazyKeeper";
 import { Markdown } from "@/components/Markdown";
 import { Game, type GameReply } from "@/components/shop/Game";
 import { Signup } from "@/components/shop/Signup";
 import type { Keeper as Controller } from "@/components/keeper/scene";
 import { copy } from "@/lib/copy";
 import { formatUsdc } from "@/lib/engine/money";
+import { formatOpensAt as opensAtText } from "@/lib/mail/templates";
 import { createDemoWallet, loadDemoWallet, payingFetch, usdcOf } from "@/lib/client/wallet";
 import { createSounds, talkAlong, type Sounds } from "@/lib/client/sounds";
 import { connectWallet, subscribeWallets, walletsServerSnapshot, walletsSnapshot } from "@/lib/client/injected";
@@ -27,12 +29,18 @@ type Result =
   | { kind: "delivered"; title: string; claim: string; tx?: string }
   | { kind: "pledged"; nonce: string; required: number; claim: string };
 
-const ITEM = "overlords";
+/** What the pack page knows about the drop before anyone walks in. */
+export interface SaleInfo {
+  phase: "upcoming" | "open" | "sold_out" | "closed" | "cancelled" | "book";
+  opensAt?: string;
+  copies?: number;
+  left?: number;
+}
 const UUID = /^[0-9a-f-]{36}$/i;
 
 const errorText = (code?: string) => copy.errors[code ?? ""] ?? copy.errors.generic;
 
-export function Shop({ refNonce }: { refNonce?: string }) {
+export function Shop({ itemId, name, blurb, sale, refNonce }: { itemId: string; name: string; blurb: string; sale?: SaleInfo; refNonce?: string }) {
   const keeper = useRef<Controller | null>(null);
   const sounds = useRef<Sounds | null>(null);
   const stopTalk = useRef<(() => void) | null>(null);
@@ -65,7 +73,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
 
   async function openPeek() {
     setPeek("");
-    const r = await fetch(`/api/preview/${ITEM}`);
+    const r = await fetch(`/api/preview/${itemId}`);
     setPeek(r.ok ? (await r.json()).markdown : copy.errors.generic);
   }
   const [now, setNow] = useState(0);
@@ -145,9 +153,13 @@ export function Shop({ refNonce }: { refNonce?: string }) {
     setBusy(true);
     setError(undefined);
     try {
-      const r = await fetch("/api/haggle", { method: "POST", body: JSON.stringify({ item: ITEM, ref: refNonce }) });
+      const r = await fetch("/api/haggle", { method: "POST", body: JSON.stringify({ item: itemId, ref: refNonce }) });
       const j = await r.json();
-      if (!r.ok) return setError(errorText(j.error));
+      if (!r.ok) {
+        // A drop that isn't open: she says why (not open yet, sold out, closed).
+        if (j.line) return hear({ line: j.line, action: "closed" });
+        return setError(errorText(j.error));
+      }
       setItem(j.item);
       setAsk(j.ask);
       setSession(j.session);
@@ -260,7 +272,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
     setBusy(true);
     setError(undefined);
     try {
-      const r = await payingFetch(wallet.signer)(`/api/item/${ITEM}?offer=${offer}`);
+      const r = await payingFetch(wallet.signer)(`/api/item/${itemId}?offer=${offer}`);
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
         setError(r.status === 402 ? copy.errors.payment_failed : errorText(j.error));
@@ -354,9 +366,11 @@ export function Shop({ refNonce }: { refNonce?: string }) {
         )}
 
         <div className="rounded-2xl border-2 border-[#151311] bg-white p-4 shadow-[4px_4px_0_#151311]">
-          <p className="font-display text-lg font-extrabold leading-tight">{item?.name ?? "How to Give Up and Love Your AI Overlords"}</p>
-          <p className="text-sm text-[#151311]/70">{item?.blurb ?? "A survival guide written entirely in the finest AI slop."}</p>
-          <button onClick={openPeek} className="mt-1 text-sm font-bold text-[#ff4a24] underline">{copy.peek}</button>
+          <Link href="/" className="text-xs font-bold uppercase tracking-widest text-[#151311]/50 hover:text-[#151311]">{copy.shelf.back}</Link>
+          <p className="font-display text-lg font-extrabold leading-tight">{item?.name ?? name}</p>
+          <p className="text-sm text-[#151311]/70">{item?.blurb ?? blurb}</p>
+          <button onClick={openPeek} className="mt-1 text-sm font-bold text-[#ff4a24] underline">{sale && sale.phase !== "book" ? copy.shelf.peek : copy.peek}</button>
+          {sale && sale.phase !== "book" && <p className="mt-1 font-mono text-xs font-bold">{saleLine(sale)}</p>}
           <div className="mt-3 flex items-end justify-between">
             <div>
               <p className="text-xs font-bold uppercase tracking-widest text-[#151311]/60">{deal ? copy.yourDeal : copy.hisPrice}</p>
@@ -467,7 +481,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
             )}
 
             {!session ? (
-              <button onClick={walkIn} disabled={busy} className="rounded-full bg-[#151311] py-4 font-display text-xl font-extrabold text-white disabled:opacity-50">
+              <button onClick={walkIn} disabled={busy || (sale !== undefined && sale.phase !== "open" && sale.phase !== "book")} className="rounded-full bg-[#151311] py-4 font-display text-xl font-extrabold text-white disabled:opacity-50">
                 {copy.walkIn}
               </button>
             ) : (
@@ -561,7 +575,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
       {peek !== null && (
         <div role="dialog" aria-modal="true" aria-label={copy.peek} onClick={() => setPeek(null)} className="fixed inset-0 z-50 flex items-center justify-center bg-[#151311]/60 p-4">
           <div onClick={(e) => e.stopPropagation()} className="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border-2 border-[#151311] bg-white shadow-[6px_6px_0_#ff4a24]">
-            <p className="border-b-2 border-[#151311] bg-[#fff6ea] px-5 py-3 text-sm font-semibold">{copy.peekTitle}</p>
+            <p className="border-b-2 border-[#151311] bg-[#fff6ea] px-5 py-3 text-sm font-semibold">{sale && sale.phase !== "book" ? copy.shelf.peekTitle : copy.peekTitle}</p>
             <div className="overflow-y-auto px-6 py-5">
               {peek ? <Markdown text={peek} /> : <p className="font-mono text-sm">{copy.reader.loading}</p>}
             </div>
@@ -573,4 +587,12 @@ export function Shop({ refNonce }: { refNonce?: string }) {
       )}
     </div>
   );
+}
+
+/** The drop's state in one line, from the server's numbers. */
+function saleLine(sale: SaleInfo): string {
+  if (sale.phase === "upcoming" && sale.opensAt) return copy.drop.notOpen(opensAtText(sale.opensAt));
+  if (sale.phase === "sold_out") return copy.drop.soldOut;
+  if (sale.phase === "closed" || sale.phase === "cancelled") return copy.drop.closed;
+  return sale.left !== undefined && sale.copies !== undefined ? copy.drop.left(sale.left, sale.copies) : "";
 }

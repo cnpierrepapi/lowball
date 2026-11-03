@@ -3,6 +3,7 @@ import type { Item } from "./engine/negotiate";
 import { packFloor, packList } from "./engine/drops";
 import { db } from "./db";
 import { shopStore, type Pack } from "./shop/store";
+import { OLD_BOOK } from "./oldbook";
 
 export interface ShelfItem extends Item {
   blurb: string;
@@ -14,10 +15,8 @@ export interface ShelfItem extends Item {
 // but its receipts still open and friends' links for open pledges still work.
 export const SHELF: Record<string, ShelfItem> = {
   overlords: {
-    id: "overlords",
+    ...OLD_BOOK,
     kind: "book",
-    name: "How to Give Up and Love Your AI Overlords",
-    blurb: "A survival guide written entirely in the finest AI slop.",
     file: "overlords.md",
     list: toMicro(2),
     floor: toMicro(1.1),

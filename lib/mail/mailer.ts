@@ -64,3 +64,12 @@ export function mailer(): Mailer {
   if (override) return override;
   return mailSettings().live ? zohoMailer() : logMailer();
 }
+
+/**
+ * The mailer, with the dashboard's switch: real sending if MAIL_LIVE=1 is set on the server, or
+ * if the dashboard turned it on (setting mail_live = "1"). Either way the Zoho settings must exist.
+ */
+export function mailerWith(dashboardLive: boolean): Mailer {
+  if (override) return override;
+  return mailSettings().live || dashboardLive ? zohoMailer() : logMailer();
+}
