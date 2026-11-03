@@ -801,3 +801,75 @@ list decides "on mission" before money is spent, so this mattered beyond the not
 anchor, spl, lamports, pda, devnet, a program's name, usdc or x402. The everyday words still count
 toward "2 developer words", but never make a lead Solana on their own. Tests cover both the mission
 check and the clear; putting "program" back on the list fails them.
+
+## Pay with any crypto, through Aurora Intents (3 Nov)
+
+**What it does.** After a cash handshake, under the usual "Pay" button there's a second one: "Pay
+with any crypto (real money)". The buyer picks what they hold (USDC or ETH on Base, Arbitrum or
+Ethereum; USDT on Ethereum or Tron; USDC or SOL on Solana; or BTC) and types their own address on
+that chain, for a refund. The shop asks Aurora Intents for a one-time deposit address. The buyer
+sends the amount Aurora names. Aurora swaps it and delivers exactly the shaken price in USDC on
+Solana mainnet to the shop's address. When Aurora says it's done, the buyer gets the pack, the
+same as an x402 payment.
+
+**What data moves where:**
+1. The browser asks `GET /api/intents` for the list of tokens. Without a key saved in the back
+   office, the answer is "off" and the button never shows.
+2. The browser sends `start` with the signed offer, the token, and the refund address. The
+   server checks the offer's signature and expiry, that it's a cash deal, and that it hasn't
+   been paid onchain already. **The price comes only from the signed offer**, never from the
+   browser.
+3. For a pack, the copy's hold is stretched to 30 minutes (Aurora's 20-minute deadline plus 10).
+   If the hold is already gone, the buyer hears "sold out" and Aurora is never asked.
+4. The server asks Aurora for an EXACT_OUTPUT quote: exactly the price in micro-USDC, as USDC on
+   Solana, to the shop's address. Aurora answers with a deposit address and how much of the
+   buyer's token to send. That's saved in the `intent_payments` table, one row per offer, so
+   asking again returns the same address and never a second quote.
+5. The browser asks `status` every 5 seconds. The server asks Aurora. On SUCCESS, the server
+   checks Aurora's own record: the recipient is the shop, the token is USDC on Solana, and at
+   least the price arrived. If any of that is wrong, it's marked FAILED.
+6. On a real SUCCESS, the server writes the usual onchain receipt on devnet (the buyer named if
+   they gave a Solana refund address, otherwise the shop), marks the copy sold, and hands the
+   browser the claim to read the pack.
+7. On REFUNDED or FAILED, the copy goes back on the shelf. Aurora returns the money to the
+   refund address.
+
+**The back office:** a box for the Aurora key (Aurora's docs say the key isn't secret; it's
+stored in the settings table, never sent back to the page), a line saying whether the shop's
+address has a USDC account on Solana mainnet, and the last 10 payments with their status.
+
+**What could break it:**
+- Aurora is down or slow. The buyer sees "Aurora isn't answering", and the x402 button still
+  works.
+- The shop's address has no USDC account on mainnet. The back office warns about this.
+- The buyer sends too little, or too late. Aurora refunds them. The copy goes back on the shelf.
+- The receipt can't be written (devnet RPC down). The payment stays SUCCESS without a receipt.
+  The next status check tries again, and the copy isn't marked sold until it's written.
+- This is real money on mainnet. There's no test network for Aurora.
+
+**Tests:** 16 in `lib/intents/pay.test.ts`, 10 in `app/api/intents/intents.test.ts`, and 1 in
+`app/api/admin/admin.test.ts`, against a fake Aurora built from the documented response shapes.
+Each of these 25 rules was checked by deleting it and confirming a test fails:
+- the quote asks EXACT_OUTPUT, for the exact price, to the shop;
+- the short token list;
+- one payment per offer;
+- a drop copy's hold is stretched, and no live hold means "sold out" with no quote;
+- SUCCESS is only paid when the recipient, token and amount all match;
+- refunds and failures release the copy;
+- the copy is only sold once the receipt is written;
+- final payments aren't asked about again;
+- the buyer is named only with a Solana address;
+- the signed offer, cash only, already paid, refund address and listed token checks on the
+  route;
+- the claim is only given when paid;
+- the button is hidden without a key;
+- the admin key is trimmed and junk is refused.
+
+**Not tested:** a real payment through Aurora (it needs real money and the key), and the
+buyer's panel in a browser.
+
+**Bugs hit, and the fixes:**
+- **`connection()` in the GET route throws outside a real request.** The route test replaces it
+  with a no-op, the same way the test stands in for any other request.
+- **The test pack's id was too short.** Pack ids are checked in the database (3 to 32
+  characters), so "p1" became "pk1".

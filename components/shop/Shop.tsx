@@ -8,6 +8,7 @@ import { LazyKeeper as Keeper } from "@/components/keeper/LazyKeeper";
 import { Markdown } from "@/components/Markdown";
 import { Game, type GameReply } from "@/components/shop/Game";
 import { Signup } from "@/components/shop/Signup";
+import { PayAnyCrypto } from "@/components/shop/PayAnyCrypto";
 import type { Keeper as Controller } from "@/components/keeper/scene";
 import { copy } from "@/lib/copy";
 import { formatUsdc } from "@/lib/engine/money";
@@ -223,6 +224,14 @@ export function Shop({ itemId, name, blurb, sale, refNonce }: { itemId: string; 
       setBusy(false);
     }
   }
+
+  // Paid with any crypto: the same ending as an x402 payment.
+  const paidAnyCrypto = useCallback((claim: string) => {
+    history.replaceState(null, "", `?claim=${encodeURIComponent(claim)}`);
+    sounds.current?.play("paid");
+    setResult({ kind: "delivered", title: item?.name ?? name, claim });
+    keeper.current?.react("nod");
+  }, [item, name]);
 
   function gameDone(j: GameReply) {
     setPlaying(undefined);
@@ -519,6 +528,7 @@ export function Shop({ itemId, name, blurb, sale, refNonce }: { itemId: string; 
                     ))}
                   </>
                 )}
+                {deal.kind === "cash" && <PayAnyCrypto itemId={itemId} offer={offer} onPaid={paidAnyCrypto} />}
               </div>
             )}
           </>
