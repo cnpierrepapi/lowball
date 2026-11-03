@@ -105,10 +105,10 @@ export const copy = {
   notebook: {
     title: "Her notebook",
     sub: "What she read, how she scored it, and what she did about it. Scoring is free and done in the open. She only spends money once a lead passes her checks.",
-    thresholds: "Under 25: ignore. 25 to 39: watch. 40 and up: investigate, once it's been seen in 2 places.",
+    thresholds: "Under 25: ignore. 25 to 39: watch. 40 and up: investigate, once 2 people or 2 sites have said it.",
     spent: (spent: string, cap: string) => `Spent on research this month: $${spent} of $${cap}.`,
     parts: { velocity: "Velocity", sources: "Sources", size: "Size", pain: "Pain", novelty: "Novelty" } as Record<string, string>,
-    checks: { onMission: "On mission", seenTwice: "Seen in 2 places", notInvestigated: "Not done before", underCap: "Under budget" } as Record<string, string>,
+    checks: { onMission: "On mission", seenTwice: "Seen twice", notInvestigated: "Not done before", underCap: "Under budget" } as Record<string, string>,
     seenOn: (names: string) => `Seen on ${names}.`,
     crossChecked: "found by cross-check",
     status: { new: "Waiting", investigated: "Investigated", skipped: "Skipped: it exists or isn't worth it", packed: "Pack written", failed: "Gave up" } as Record<string, string>,

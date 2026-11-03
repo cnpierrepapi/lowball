@@ -1,7 +1,15 @@
 // The coordinator: checks that run before any money is spent on a lead. All free, all shown on
 // the notebook page with their reasons.
 
-/** Words that put a lead inside the mission: tools for developers. */
+/** The mission: tools for developers building on Solana. A lead needs one of these... */
+export const CRYPTO_WORDS = [
+  "solana", "anchor", "spl", "lamport", "lamports", "pda", "cpi", "idl", "devnet", "mainnet", "testnet", "validator", "validators",
+  "rpc", "wallet", "wallets", "phantom", "jupiter", "raydium", "orca", "meteora", "metaplex", "jito", "pump", "helius", "agave",
+  "blockhash", "keypair", "pubkey", "onchain", "on-chain", "blockchain", "crypto", "defi", "nft", "nfts", "mint", "usdc", "swap",
+  "slippage", "transaction", "transactions", "program", "programs", "x402", "web3", "token", "tokens",
+];
+
+/** ...and, with it, at least 2 words from either list. */
 export const DEV_WORDS = [
   "api", "cli", "sdk", "git", "github", "gitlab", "repo", "commit", "branch", "merge", "deploy", "deployment", "ci", "pipeline",
   "build", "compile", "compiler", "test", "tests", "testing", "debug", "debugger", "log", "logs", "logging", "trace", "monitor",
@@ -19,6 +27,7 @@ export interface Check {
 
 export interface Checks {
   onMission: Check;
+  hurts: Check;
   seenTwice: Check;
   notInvestigated: Check;
   underCap: Check;
@@ -26,26 +35,41 @@ export interface Checks {
 }
 
 /**
- * Validated: the same need turned up on at least 2 different sites (directly or through the
- * cross-check). Applies to every investigation, including "investigate anyway".
+ * Validated: the same need came from at least 2 different sites, or 2 different people (owner's
+ * call, 3 Nov: Solana's sources are quiet, so two people on the same site also count). Applies to
+ * every investigation, including "investigate anyway". Chain numbers aren't people.
  */
-export function seenTwice(placesSeen: string[]): Check {
-  return placesSeen.length >= 2
-    ? { ok: true, why: `seen on ${placesSeen.join(", ")}` }
-    : { ok: false, why: `only seen on ${placesSeen.join(", ") || "nothing"}; needs 2 different sites` };
+export function seenTwice(placesSeen: string[], people = 0): Check {
+  if (placesSeen.length >= 2) return { ok: true, why: `seen on ${placesSeen.join(", ")}` };
+  if (people >= 2) return { ok: true, why: `${people} different people asked, on ${placesSeen.join(", ")}` };
+  return { ok: false, why: `only 1 person on ${placesSeen.join(", ") || "nothing"}; needs 2 people or 2 sites` };
 }
 
-/** Inside the mission if at least 2 developer words show up, and it isn't one app's feature request. */
+/** "owner/repo" -> "owner": issues from one account or organisation are one project. */
+export const ownerOf = (repo: string) => repo.split("/")[0].toLowerCase();
+
+/**
+ * Inside the mission: at least one Solana or crypto word, at least 2 developer or crypto words
+ * in all, and not every post an issue from one GitHub owner (that's one project's to-do list).
+ */
 export function onMission(text: string, repos: string[], postCount: number): Check {
-  const words = new Set(text.toLowerCase().match(/[a-z0-9+#]+/g) ?? []);
-  const found = DEV_WORDS.filter((w) => words.has(w));
-  if (found.length < 2) {
-    return { ok: false, why: `only ${found.length} developer word${found.length === 1 ? "" : "s"} (${found.join(", ") || "none"}); needs 2` };
+  const words = new Set(text.toLowerCase().match(/[a-z0-9+#.-]+/g) ?? []);
+  const crypto = CRYPTO_WORDS.filter((w) => words.has(w));
+  const dev = DEV_WORDS.filter((w) => words.has(w) && !crypto.includes(w));
+  if (crypto.length === 0) return { ok: false, why: "nothing about Solana or crypto" };
+  if (crypto.length + dev.length < 2) return { ok: false, why: `only 1 developer word (${crypto[0]}); needs 2` };
+  const ghRepos = repos.filter((r) => r.includes("/"));
+  if (postCount > 0 && ghRepos.length === postCount && new Set(ghRepos.map(ownerOf)).size === 1) {
+    return { ok: false, why: `every post is an issue from ${ownerOf(ghRepos[0])}: one project's to-do list, not a missing tool` };
   }
-  if (postCount > 0 && repos.length === postCount && new Set(repos).size === 1) {
-    return { ok: false, why: `every post is an issue on ${repos[0]}: a feature request for one project, not a missing tool` };
-  }
-  return { ok: true, why: `developer words: ${found.slice(0, 6).join(", ")}` };
+  return { ok: true, why: `about ${[...crypto, ...dev].slice(0, 6).join(", ")}` };
+}
+
+/** Someone said it hurts: at least one post uses a pain phrase. A chain number alone doesn't count. */
+export function hurts(painFound: string[]): Check {
+  return painFound.length > 0
+    ? { ok: true, why: `said: ${painFound.slice(0, 4).join(", ")}` }
+    : { ok: false, why: "nobody said it hurts (no pain phrase in any post)" };
 }
 
 /** Not already looked into: same lead, or one sharing half its words, investigated in the last 30 days. */
@@ -72,6 +96,6 @@ export function underCap(spentThisMonth: number, capUsd: number, step: keyof typ
     : { ok: false, why: `${line} would pass the $${capUsd.toFixed(2)} cap` };
 }
 
-export function checks(c: { onMission: Check; seenTwice: Check; notInvestigated: Check; underCap: Check }): Checks {
-  return { ...c, pass: c.onMission.ok && c.seenTwice.ok && c.notInvestigated.ok && c.underCap.ok };
+export function checks(c: { onMission: Check; hurts: Check; seenTwice: Check; notInvestigated: Check; underCap: Check }): Checks {
+  return { ...c, pass: c.onMission.ok && c.hurts.ok && c.seenTwice.ok && c.notInvestigated.ok && c.underCap.ok };
 }
