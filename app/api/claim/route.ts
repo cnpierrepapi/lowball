@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SHELF } from "@/lib/catalog";
+import { itemById } from "@/lib/catalog";
 import { readClaim } from "@/lib/claim";
 import { standing } from "@/lib/purchase";
 
@@ -7,8 +7,8 @@ import { standing } from "@/lib/purchase";
 // purchase is theirs; the chain says whether it went through.
 export async function GET(req: NextRequest) {
   const claim = readClaim(req.nextUrl.searchParams.get("token"));
-  if (!claim || !SHELF[claim.item]) return NextResponse.json({ error: "bad_claim" }, { status: 400 });
-  const item = SHELF[claim.item];
+  const item = claim && (await itemById(claim.item));
+  if (!claim || !item) return NextResponse.json({ error: "bad_claim" }, { status: 400 });
   const s = await standing(claim);
   if (s === "delivered") return NextResponse.json({ item: item.id, status: s, title: item.name });
   if (s === "pledged") return NextResponse.json({ item: item.id, status: s, pledge: `/api/pledge/${claim.nonce}` });

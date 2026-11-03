@@ -1,5 +1,6 @@
 import { CENT, clamp, toCents, toMicro } from "./money";
 import type { Intent, Tone } from "./intent";
+import type { GameKind } from "../games/replay";
 
 export interface Personality {
   stubbornness: number; // 0..1, how slowly the ask comes down
@@ -31,6 +32,7 @@ export interface State {
   referralCounter?: number; // friends the shopkeeper is currently asking for
   referralOnTable?: boolean; // the last thing he said was a friends number, so "deal" means that deal
   deal?: Deal;
+  gameOffered?: boolean; // she has already asked to be entertained in this haggle
 }
 
 export type Action =
@@ -44,7 +46,9 @@ export type Action =
   | "call_back"
   | "hold"
   | "walk_out"
-  | "closed";
+  | "closed"
+  | "entertain_me" // she's bored and wants a game (see games.ts)
+  | "game_result"; // the server scored the game and the ask moved
 
 // What the LLM gets back to phrase. Every number here came from the engine.
 export interface Decision {
@@ -54,6 +58,8 @@ export interface Decision {
   insulted: boolean; // offer under half the floor, the namesake lowball
   referralsNeeded?: number;
   deal?: Deal;
+  game?: GameKind;
+  score?: number; // a game score the server worked out by replaying the moves
 }
 
 export const MIN_PRICE = CENT; // nothing sells for less than 0.01
@@ -131,6 +137,8 @@ export function step(item: Item, prev: State, intent: Intent): { state: State; d
     }
 
     case "referral": {
+      // Cash-only items (drops) have no friends deal: she keeps talking price.
+      if (item.maxReferrals < 1) return decide("hold");
       s.round += 1;
       const target = referralTarget(item, s.mood);
       if (intent.referrals === undefined) {

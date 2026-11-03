@@ -3,7 +3,7 @@ import { withX402 } from "@x402/next";
 import { decodePaymentResponseHeader, decodePaymentSignatureHeader } from "@x402/core/http";
 import { decodeTransactionFromPayload, getTokenPayerFromTransaction, type ExactSvmPayloadV1 } from "@x402/svm";
 import { address, type Address } from "@solana/kit";
-import { SHELF } from "@/lib/catalog";
+import { itemById } from "@/lib/catalog";
 import { verifyOffer, type Offer } from "@/lib/offer";
 import { claimFor } from "@/lib/claim";
 import { USDC_DEVNET, SOLANA_DEVNET, merchantAddress, resourceServer } from "@/lib/x402";
@@ -27,9 +27,9 @@ function offerFrom(url: string): Offer {
   return check.offer;
 }
 
-function delivered(offer: Offer, extra: Record<string, unknown> = {}) {
+async function delivered(offer: Offer, extra: Record<string, unknown> = {}) {
   return NextResponse.json({
-    item: offer.item, status: "delivered", paid: offer.deal.price, title: SHELF[offer.item].name, claim: claimFor(offer), ...extra,
+    item: offer.item, status: "delivered", paid: offer.deal.price, title: (await itemById(offer.item))?.name, claim: claimFor(offer), ...extra,
   });
 }
 
@@ -99,7 +99,7 @@ function settledOk(res: Response): boolean {
 /** Writes the cash receipt, and counts it for the pledge it came through if there is one. */
 async function recordCash(offer: Offer, buyer: Address): Promise<void> {
   const auth = await shopSigner();
-  const item = SHELF[offer.item];
+  const item = (await itemById(offer.item))!;
   const deal = await recordDealIx({ nonce: offer.nonce, item: item.id, buyer, listPrice: item.list, paid: offer.deal.price }, auth);
   const tries: (() => Promise<unknown>)[] = [];
   if (offer.ref) {
@@ -142,7 +142,7 @@ export async function GET(req: NextRequest) {
 
 async function buy(req: NextRequest) {
   const id = itemIdFrom(req.url);
-  if (!SHELF[id]) return NextResponse.json({ error: "no_such_item" }, { status: 404 });
+  if (!(await itemById(id))) return NextResponse.json({ error: "no_such_item" }, { status: 404 });
   const check = verifyOffer(req.nextUrl.searchParams.get("offer"), id);
   // Bad, expired and spent offers are turned away before any payment is asked for.
   if (!check.ok) return NextResponse.json({ error: check.reason }, { status: 410 });
@@ -179,7 +179,7 @@ async function buy(req: NextRequest) {
       if (p && p.buyer !== payer) return NextResponse.json({ error: "offer_used" }, { status: 409 });
       if (!p) {
         const auth = await shopSigner();
-        const item = SHELF[id];
+        const item = (await itemById(id))!;
         const d = offer.deal as { price: number; referrals: number };
         try {
           await send([await openPledgeIx({

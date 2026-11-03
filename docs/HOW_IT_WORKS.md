@@ -1,0 +1,532 @@
+# How Lowball works
+
+Plain-words notes on each feature: what the code does, what data moves where, what could
+break it, and every bug hit while building it and how it was fixed.
+
+## Games: "Entertain me"
+
+### What it does
+
+Sometimes in the middle of a haggle she gets bored and asks for a game: Snake or Stack. Play
+well and her price comes down. Play badly and nothing changes. Her price never goes under her
+floor, whatever the score.
+
+- **Snake.** Steer with the arrow keys or by swiping. Eat the red dots and don't hit the walls
+  or yourself. Score = dots eaten. At most about 60 seconds.
+- **Stack.** A block slides back and forth. Tap, click or press space to drop it. Whatever hangs
+  over the block below gets cut off. Miss completely and the game ends. Score = blocks stacked.
+  At most 60 seconds.
+
+### Who decides what
+
+The engine decides everything. The model only says the line.
+
+- **When she gets bored** (`lib/engine/games.ts`, `gameToOffer`). All of these must be true:
+  - the haggle is still open;
+  - she just countered or held (not right after a deal, a raise or a walk-out);
+  - her mood is above -0.5, because angry shopkeepers don't play;
+  - her ask is at least 5% of the list price above her floor, so there is something to win;
+  - no game has come up in this haggle yet. One game per haggle.
+
+  The round it happens on (3, 4 or 5) and which game it is both come from a hash of the haggle's
+  id. So it feels random, but it's fixed per haggle and asking again can't reroll it.
+- **What a score is worth** (`askAfterGame`):
+  `new ask = ask - (score / target) x 50% x (ask - floor)`, rounded down to the cent, then held
+  between the floor and the old ask. The target is 15 dots for Snake and 20 blocks for Stack.
+  Scoring over the target counts as hitting the target. A score of zero changes nothing. A
+  weird score (negative, not a number, infinite) is treated as zero.
+- **What she says.** Her lines go through the same honesty guard as every other line. The score
+  is added to the numbers she may say, and nothing else is. If the model's line fails the guard,
+  she says the safe built-in line instead.
+
+### What data moves where
+
+1. **Offer.** The buyer sends a haggle message as normal. If the engine says she's bored, the
+   server makes a game id, picks a random seed (128 random bits from the operating system),
+   and saves both in the `games` table in Neon Postgres. The reply carries the game id and the
+   game's name. **It doesn't carry the seed.** The haggle's sealed state remembers which game
+   was offered.
+2. **Start.** The buyer presses "Entertain her". The page calls `POST /api/game` with
+   `op: "start"`. The server checks the game belongs to this haggle and hasn't been started,
+   writes the start time using the database's clock, and only now sends the seed. Start works
+   once, and only within 10 minutes of the offer.
+3. **Play.** The browser runs the same game code as the server (`lib/games/snake.ts`,
+   `lib/games/stack.ts`), from the same seed, so it sees the same game. It draws it and records
+   what the player pressed and on which tick, like "turned left on tick 42". It never works out a
+   score to send.
+4. **Finish.** The browser sends `op: "finish"` with that list of presses and the tick it stopped
+   on. The server:
+   - checks the list (`readLog`): whole numbers only, ticks strictly going up, every press before
+     the stop tick, real directions only, not too many presses, the stop tick inside the time
+     limit;
+   - replays the game from the seed it saved and counts the score itself (`replay`);
+   - checks the game took at least as long on the server's clock as it claims to have lasted
+     (`playedInRealTime`, with 1.5 seconds of slack for the browser's timer);
+   - closes the game in the database so it can never be finished again.
+
+   A bad log or a too-fast log also closes the game, with a score of 0, so a cheater gets one
+   try, not many.
+5. **Price.** The engine turns the score into her new ask. She says it. The new ask goes into the
+   haggle's sealed state, and "deal" after that is a normal cash deal at the new price. The
+   payment code is untouched: it signs and charges whatever the engine decided, as before.
+
+### The database
+
+`db/001_games.sql` makes one table, `games`. To set it up, open the Neon project's SQL editor and
+paste the file in, or run it with `psql "$DATABASE_URL" -f db/001_games.sql`. The app reads
+`DATABASE_URL` to find the database (`lib/db.ts`).
+
+Every single-use rule is a single SQL statement, so two requests racing for one game can't both
+win. For example, Start is "set started_at where it is still empty", and only one request can
+do that.
+
+`lib/games/store.ts` has two versions with the same shape: Postgres for real use, and an
+in-memory one for tests and local development.
+
+### What could break it, and what's left
+
+- **No `DATABASE_URL` in production:** games are off. She never offers one, and the haggle works
+  as before. Without the database there's no single-use rule, so no games.
+- **Database down when she'd offer a game:** she just keeps haggling. The offer only goes out
+  once the game is saved.
+- **Bots:** any game in a browser can be played by a script that sends perfect moves in real time.
+  What protects the shop is the cap on what a game can win: at most half the gap to her floor,
+  never below the floor, and one game per haggle. A patient haggler can reach the floor anyway.
+- **Copying someone else's great game:** the log only means something with its own seed. On
+  another seed it plays out differently and usually crashes early (tested).
+- **Practising on the seed first:** the seed only appears at Start, and the clock starts then.
+- **Changing the game code:** the browser and the server must run the same version. A deploy in
+  the middle of someone's game could make their replay disagree. That's rare and costs them one
+  game.
+- **Haggles started before this shipped** have no id, so they never get a game.
+
+### Tests
+
+- `lib/games/games.test.ts`:
+  - The same seed and log always give the same score.
+  - A score field the browser sends is ignored.
+  - A log copied from another seed is worth little.
+  - Every malformed log is refused.
+  - Games that end in a crash or a miss replay cleanly.
+  - The real-time rule holds.
+  - Start and Finish are each single use, inside their time windows, and tied to their own haggle.
+  - Too-fast and forged logs burn the game.
+  - Two racing Finishes: only one wins.
+- `lib/engine/games.test.ts`: every condition for getting bored, and the plan is fixed per haggle.
+  The score maths:
+  - zero changes nothing;
+  - a perfect game takes half the gap;
+  - beating the target earns no more;
+  - a higher score never costs more;
+  - 5,000 random asks and scores never go under the floor or over the ask.
+
+  The safe built-in lines pass the honesty guard.
+- `app/api/game/game.test.ts`: the whole loop through the real routes, with only the two model
+  calls faked:
+  - haggle until she's bored, start, play, finish, and the price drops;
+  - "deal" then gives a cash deal at the new price;
+  - finishing twice fails;
+  - another haggle's game id is refused;
+  - a tampered session is refused;
+  - a too-fast log earns nothing;
+  - talking walks away from the game;
+  - only one game per haggle;
+  - no database means no games;
+  - a database failure means no game and no harm.
+
+Each rule was checked by deleting it and confirming a test fails (26 rules, all caught).
+
+### Bugs hit while building it, and the fixes
+
+1. **Stack couldn't be lost.** The sliding block stayed inside the play area, which was never
+   more than one block width away from the tower, so every drop landed. A test waiting for a
+   miss looped forever. Fix: the block now slides half off either edge, so it can miss
+   completely. The starting block is 40 wide instead of 60.
+2. **The test for "too many presses" didn't test that rule.** The oversized log it used was also
+   refused for having a press on the stop tick, so deleting the size limit didn't fail any test.
+   Fix: a new test with 201 valid, well-spaced drops, which is refused only by the size limit.
+3. **Start was called twice in development.** In development, React deliberately runs a
+   component's start-up code twice. The game board called Start in its start-up code. The
+   second call hit the single-use rule and the game closed straight away. Fix: Start is called
+   once from the "Entertain her" button, and the board gets the seed as an input.
+4. **A Stack game that ended on a miss was refused as a bad log.** A miss ended the game without
+   moving the tick counter, so the final drop sat on the stop tick, and the log check refuses
+   any press on or after the stop tick. Fix: a miss uses up its tick like any other drop. There's
+   a test for this, and one for Snake ending in a crash.
+5. **Local dev lost games between routes.** Without a database, dev uses a memory store. Dev
+   reloads gave the haggle route and the game route separate copies of it, so Start couldn't
+   find the game the haggle had just offered. Fix: the dev store sits on `globalThis` so every
+   route shares it. Production uses Postgres and wasn't affected.
+
+## Drop emails with double opt-in
+
+### What it does
+
+Below the haggle there's a box: "I get new stuff in. Not often. Leave your email and I'll tell
+you when." Leaving an address sends one email, "Confirm it's you", with a link. Only addresses
+that click it ever get a drop email. Every drop email has a link to leave the list, and leaving
+deletes the address.
+
+### What data moves where
+
+1. **Signup** (`POST /api/mail/signup`). The browser sends only the address, and only to our
+   server. The server:
+   - limits each IP to 5 signups a minute and 20 an hour;
+   - trims and lowercases the address;
+   - checks it has one `@`, a dotted domain, no spaces, and is 254 characters or fewer;
+   - checks the domain can receive mail (a DNS lookup, 2 seconds at most; if DNS doesn't answer,
+     the address is let through).
+
+   Then it saves the row in the `subscribers` table: email, signup time, confirmed = no, and two
+   random values called nonces (one for confirming, one for leaving). The answer to the browser
+   is the same whatever happened, so nobody can use the box to find out who's on the list.
+2. **The confirmation email.** It goes into the `outbox` table and is sent straight away if
+   today's cap allows. Otherwise it goes out the next day.
+3. **The links.** A link carries a token made from the row's nonce and the server's secret key
+   (`OFFER_SIGNING_KEY`), labelled "confirm" or "unsub". The database holds the nonce and a hash
+   of the token, never the token itself. So:
+   - someone who reads the database can't make a working link;
+   - a confirm link can't unsubscribe, and an unsubscribe link can't confirm;
+   - one person's link only ever touches their own row;
+   - a made-up token matches nothing.
+4. **Confirming** (`/confirm` page, then `POST /api/mail/confirm`). Opening the link only shows a
+   page with a "Yes, that's me" button. Pressing it confirms. This is because mail scanners open
+   every link in an email to check it, and a link that worked on opening would sign people up
+   without them. A confirm link works once, and for 7 days.
+5. **Signing up again.**
+   - Already confirmed: nothing happens.
+   - Not confirmed, and the last link went out less than an hour ago: nothing happens.
+   - Not confirmed, and the last link went out over an hour ago: a fresh link goes out, and the
+     old link stops working.
+6. **Leaving** (`/unsubscribe` page with a "Take me off" button, or the one-click unsubscribe
+   that mail apps show). This deletes the row. Anything still queued for that address is
+   deleted with it.
+7. **A drop.** `announceDrop` queues one email per **confirmed** address, then starts sending.
+   Announcing the same drop twice queues nothing new. The auctions feature will call this when a
+   drop is scheduled. The email says when haggling opens, like "Thu 6 Nov, 18:00 UTC".
+8. **Sending and the cap.** Everything Lowball sends goes through the outbox, so the cap covers
+   all of it, confirmations included. Each round of sending:
+   - takes a database lock, so two servers sending at once take turns;
+   - counts what's gone out today (UTC) in `mail_days`;
+   - takes at most `LOWBALL_MAIL_DAILY_CAP` minus that (default 40, at most 500, and a bad value
+     falls back to 40), confirmations first;
+   - sends a drop email only to a confirmed address, and a confirmation only to an unconfirmed
+     one. This is checked again at the moment of sending.
+
+   A failed send still counts against the cap. It's retried 10 minutes later at the earliest, and
+   given up after 3 tries.
+9. **The daily cron.** Once a day Vercel calls `/api/cron/mail` (in `vercel.json`), which sends
+   whatever didn't fit under yesterday's cap. The route only answers a request carrying
+   `Authorization: Bearer <CRON_SECRET>`. If `CRON_SECRET` isn't set, or is shorter than 16
+   characters, it answers nobody.
+10. **Live or not.** Only `MAIL_LIVE=1` (exactly that) sends through Zoho: port 465, a secure
+    connection, the host from `ZOHO_SMTP_HOST` (default `smtp.zoho.eu`), and the address and
+    password from `ZOHO_MAIL_USER` and `ZOHO_APP_PASSWORD`. The emails come from "Lowball".
+    Without it, the log says who would have got which subject, with the address part-hidden and
+    no links. Tests swap in a fake mailbox and never send anything.
+11. **Links point at the right site.** The live site in production, the preview's own address on
+    a preview, localhost in development. `LOWBALL_SITE_URL` overrides all of these if it's set.
+
+### The database, and migrations
+
+`db/002_mail.sql` adds `subscribers`, `outbox` and `mail_days`. `npm run build` now runs
+`scripts/migrate.mts` before `next build`:
+- On Vercel, `DATABASE_URL` is set, so any SQL file in `db/` that hasn't run yet runs in one
+  transaction, together with a note in `schema_migrations` that it ran.
+- A broken file changes nothing.
+- Without `DATABASE_URL`, the step skips.
+- Files only ever add things.
+
+`/api/health` now reports:
+- `database` (true, or "unreachable"; never the error text, which could carry connection
+  details);
+- `tables` (true when the four tables exist, which proves the migration ran);
+- `mail` (fails only when `MAIL_LIVE=1` and the Zoho settings are missing);
+- a true/false for each mail setting being present. It never shows a value.
+
+### What could break it
+
+- **The shared mailbox.** The Zoho mailbox is shared with another product, so a busy day there
+  can use up Zoho's own limit. Lowball's sends then fail, get logged, and are retried later.
+- **Spam folders.** Whether mail lands in the inbox depends on the domain's SPF and DKIM records
+  in Zoho. The code can't check that.
+- **Previews share the live database**, because `DATABASE_URL` is set for all environments. A
+  test signup on a preview is a real row.
+- **The cap under real concurrency.** The lock that makes two senders take turns can't be proven
+  in the tests, which run one connection at a time (PGlite). The test with two senders at once
+  passes, but it would pass without the lock too. On Neon, the lock is standard Postgres
+  behaviour.
+- **A slow DNS answer lets an address through.** At worst a confirmation goes nowhere and the row
+  just stays unconfirmed.
+
+### Tests
+
+The SQL runs on real Postgres in memory (PGlite), with the same migration files as production.
+
+- `lib/mail/mail.test.ts`:
+  - addresses: good ones accepted and lowercased; 17 bad shapes and non-strings refused; the
+    254-character limit; dead domains refused;
+  - tokens: unique, labelled by purpose, need the server key, never stored;
+  - double opt-in: one email, single use, 7 days, can't cross addresses or purposes, the hourly
+    resend, nothing for confirmed addresses;
+  - drops: confirmed addresses only, even when forced into the queue; once per drop; the
+    unsubscribe link and header work; leaving clears the queue;
+  - the cap: holds, the rest go the next day, confirmations count, zero means none, two senders
+    at once, retries and giving up;
+  - `MAIL_LIVE` must be exactly "1";
+  - both emails word for word, and the date format.
+- `lib/db.test.ts`: migrations run once, and a broken file leaves nothing half done. The games
+  store's SQL on real Postgres: single-use start and finish, tied to the haggle.
+- `app/api/mail/mail-routes.test.ts`, through the real routes:
+  - signup saves, lowercases and sends;
+  - bad addresses never reach the database;
+  - the same answer for new, repeated and confirmed addresses;
+  - the rate limit;
+  - no database gives a 503;
+  - confirm works once;
+  - one-click unsubscribe from the header;
+  - the cron turns away a missing, wrong, same-length-wrong or too-short secret.
+
+As with games, each rule was deleted in turn to check a test fails (24 rules). The first pass
+found four rules with no test that caught them; see the bugs below.
+
+### Bugs hit while building it, and the fixes
+
+1. **The tests took two minutes**, because each test started its own in-memory Postgres. Fix: one
+   database per test file, with the tables wiped between tests. Now it takes 5 seconds.
+2. **Four rules weren't really tested.**
+   - An address confirmed while its confirmation email was still queued would still get that
+     email. Fix: a new test.
+   - The 254-character test address was also refused for a domain part over 63 characters, so
+     the length rule itself was never tested. My first two attempts at a fix had the arithmetic
+     wrong (254 instead of 255, then a 64-character part). Fix: an address of exactly 254 that
+     passes, and 255 that fails, with every part valid.
+   - The cron secret was only ever tried with wrong values of a different length, which the
+     length check catches before the real comparison runs. Fix: a test with a wrong secret of
+     the same length.
+   - A too-short `CRON_SECRET` was never tried. Fix: a new test.
+3. **A guard that wasn't a rule.** "Only send after a signup if something was queued" was just a
+   shortcut, and no test could tell it apart from sending anyway. Fix: removed.
+4. **Lockfile noise.** The npm here (version 10) stripped the `libc` fields from
+   `package-lock.json`. Fix: installs are done with npm 11, so the lockfile diff is only the new
+   packages.
+5. **Stopping the dev server killed my own shell** halfway through writing these notes, so they
+   had to be written twice. Nothing in the app was affected.
+6. **The first preview build failed: "Cannot find module scripts/migrate.mts".** `.vercelignore`
+   is an allowlist: Vercel only uploads the folders it names, so wallet keys and notes can never
+   ride along. `scripts/`, `db/` and `vercel.json` weren't on it. So the migration script and its
+   SQL never reached Vercel, and the daily cron in `vercel.json` would have been ignored as well.
+   Fix: the allowlist now adds `db/`, `vercel.json` and `scripts/migrate.mts` only (the rest of
+   `scripts/` stays local). To prove it, I copied only the files the allowlist lets through into
+   an empty folder, then ran a clean `npm ci` and `npm run build` there. Both passed.
+
+## Build packs, drops and auctions
+
+### What it does
+
+She doesn't sell an ebook any more. She sells **build packs**: the write-up of a tool that
+developers keep asking for and nobody has built. Each pack is sold as a **drop**: a few copies
+(5 by default), on sale between an opening time and a closing time. Once they're gone, they're
+gone.
+
+- **The free part (the teaser):** the problem, links to the real posts where developers asked for
+  it, and what already exists. Anyone can read it on the pack's page.
+- **The paid part:** the plan, a build prompt you paste into an AI coding tool, the tests that
+  prove it works, and the risks.
+
+### Who decides the numbers
+
+The engine, from the pack, never the model (`lib/engine/drops.ts`):
+- List price = 1.50 USDC + 1 cent per point of the pack's research score (0 to 100), so between
+  1.50 and 2.50.
+- Her secret floor = 55% of list.
+- As copies go, the floor climbs evenly, until it's halfway between floor and list for the last
+  copy. If the floor rises mid-haggle, her ask is lifted to it.
+- Drops are cash only. Asking about friends just keeps her talking price.
+
+### Selling the copies without overselling
+
+When a buyer shakes hands, the server sets a copy aside for them (a **hold**) before it signs the
+offer. A hold lasts 8 minutes: the 5 minutes the offer is good for, plus the 2 minutes a payment
+can take to settle, plus a minute of slack. One SQL statement under a lock checks that held plus
+sold copies are fewer than the total, so two buyers chasing the last copy can't both get it. The
+loser hears "That one's gone. Someone beat you to it." and gets no offer, so no payment is ever
+asked for a copy that doesn't exist.
+
+When a hold's time is up, the server asks the chain whether that offer was paid (the receipt the
+payment route already writes):
+- paid: the copy is marked **sold**;
+- not paid: it goes back on the shelf;
+- the chain can't be asked: it stays taken, so nothing is ever oversold.
+
+### What changed in the payment route (agreed on 3 Nov)
+
+Packs live in the database, so the payment route looks items up with `itemById` instead of the
+fixed list in the code: four lookups, nothing else. The price still comes only from the signed
+offer.
+
+### The old ebook
+
+It's off the shelf: nobody can start a new haggle for it. Old receipts still open, and friends'
+links for pledges that are still open still work.
+
+### Pages
+
+- `/`: what she does, the shelf of drops, the email box.
+- `/pack/[id]`: the free part, the drop's state, the counter.
+- `/notebook`: her research.
+- `/admin`: the back office.
+- `/read`: a bought pack in full.
+
+The shopkeeper scene (three.js, about 560 KB) now loads after the words, on every page.
+
+## The research loop and her notebook
+
+### What it does
+
+Every day she reads Hacker News and GitHub for developers saying things like "wish there was",
+"is there a tool", "someone should build", "would pay for" and "why is there no". She groups
+posts about the same missing tool into **leads** and scores them for free. Only when a lead passes
+her checks does she spend money: first to look into it with web search, then to write the pack.
+Then she puts the pack on the shelf and schedules its drop, and the drop email goes to confirmed
+subscribers.
+
+### Step by step (`lib/research/`)
+
+1. **Watch (free).** Five short phrases are searched on each source over the last 7 days. Both
+   sources were tested live on 3 Nov. Each source is a small function over `fetch`, so tests feed
+   it recorded answers. Posts are saved in `posts`.
+2. **Group (free).** Posts from the last 14 days are grouped. A post joins a group when it shares
+   at least 3 topic words, and a fifth of its words, with a post already in the group. A lead's id
+   is its oldest post, so it stays the same between runs.
+3. **Score (free).** Five parts, 0 to 20 each, 100 in all. The notebook shows each part with its
+   inputs and its rule:
+   - Velocity: 20 × min(1, posts in the last 48 hours ÷ 3).
+   - Sources: 20 × (0.75 × min(1, (different people − 1) ÷ 3) + 0.25 if it's on both HN and
+     GitHub).
+   - Size: 20 × min(1, log10(1 + points and comments) ÷ 3).
+   - Pain: 20 × min(1, different pain phrases ÷ 4).
+   - Novelty: 20 × (1 − min(1, log10(1 + matching GitHub repos) ÷ 4)). The repo count is a free
+     GitHub search, done for at most 4 promising leads a run. A lead that wasn't checked gets 10.
+
+   Under 40 is IGNORE, 40 to 59 is WATCH, 60 and up is INVESTIGATE.
+4. **Coordinator checks (free), before any money is spent:**
+   - On mission: at least 2 developer words, and not a list of issues all on one project (that's
+     a feature request, not a missing tool).
+   - Not done before: the same lead, or one sharing half its words, wasn't investigated in the
+     last 30 days. A lead that was already worked on is never investigated again.
+   - Under budget: what's been spent this month, plus the most the next step can cost ($0.60 to
+     investigate, $0.50 to write), must stay under the monthly cap ($5 by default, set on the
+     dashboard).
+5. **Investigate (paid).** Claude Opus 5.5 with web search (`web_search_20260209`, at most 5
+   searches) checks whether the tool exists, who tried, and how big the need is. A long search
+   that pauses is carried on, at most 3 times. The notes are then put into a fixed shape that is
+   checked against a schema. The real cost is recorded from the reply's usage figures: $4 per
+   million input tokens, $20 per million output tokens, and $10 per 1,000 searches.
+   - If the tool already exists, or the verdict is skip, the lead is closed and no pack is written.
+   - If the model declines, the lead is marked failed.
+   - A timeout or network error leaves the lead as it was, to try again.
+6. **Write (paid).** Opus writes the pack's fields. The server then puts the pack together:
+   - the links to the real posts come from our own data, never from the model;
+   - any other link the model writes is removed, unless it came from the web search;
+   - the build prompt sits in a code block it can't break out of;
+   - the pack id is a lowercase slug of 32 characters or fewer, because the onchain receipt
+     holds 32 bytes.
+7. **On the shelf.** The pack gets its fingerprint (sha256), and the drop is scheduled. It opens at
+   18:00 UTC, at least 12 hours ahead, with 5 copies for 48 hours. The drop email goes out when
+   the drop is scheduled. Automatic drops can be turned off on the dashboard.
+8. **Onchain fingerprint.** `lib/research/onchain.ts` is where the pack's hash goes onchain. It
+   does nothing until the Solana program gets a new instruction, which needs a program upgrade
+   from a local machine. The notebook says "not onchain yet" until then.
+
+**When it runs:** Vercel calls `/api/cron/research` once a day (watch, then at most one
+investigation and one pack). The dashboard can run each step by hand, including "Investigate
+anyway" for a WATCH lead. That runs every check except the score threshold, and is marked in the
+notebook.
+
+### The admin dashboard (`/admin`)
+
+**Logging in:**
+- There's no password in the code, because the repo is public.
+- The first visit sets the password. Only a slow scrambled version (scrypt) is stored, in the
+  database. A second set is refused by the database itself.
+- Logins are limited to 5 a minute per IP, and a login lasts 12 hours, in an HttpOnly, Secure,
+  same-site cookie.
+- Posts from other sites are refused.
+
+**What it does:**
+- Schedule a drop: preview the email and how many confirmed addresses get it, then confirm.
+- Cancel a drop that hasn't opened.
+- List packs with their fingerprint.
+- Mail: counts, sent today against the cap, a switch for real sending (refused if the Zoho
+  settings are missing), and "send what's waiting".
+- Research: what's been spent against the cap, the cap itself, the automatic-drop switch, and each
+  research step.
+
+### What could break it
+
+- **Few INVESTIGATE leads.** On a real week of posts (3 Nov), nothing scored past 29. The same need
+  shows up over weeks, so scores grow as posts collect over the 14 days. Until then, "Investigate
+  anyway" on a WATCH lead is how the first pack gets made.
+- **Rate limits.** GitHub allows 10 searches a minute without a key. A run makes up to 9 (5
+  phrases plus 4 repo counts). If GitHub says no, it's reported and the rest carries on.
+- **Time limits.** Research can take minutes. The research routes may run up to 5 minutes; if the
+  Vercel plan cuts that short, the step fails and the lead stays as it was.
+- **Previews share the live database.** Packs, drops and the admin password made on a preview are
+  live too.
+- **Not proven here.** The real model calls can't run in this session, which has no API key. They
+  are tested with a fake model; the real ones only run on Vercel.
+
+### Bugs hit while building it, and the fixes
+
+1. **Hacker News returned nothing.** The date filter's `>` has to be encoded (`%3E`); sent bare,
+   HN silently matched nothing. Long exact phrases also almost never match ("I wish there was a
+   tool" had 37 hits ever). Fix: the filter is encoded, there's a test for it, and the phrases are
+   short.
+2. **Node's fetch ignored this session's proxy.** That only affected the live test here, not
+   Vercel. Fix: the live test runs with `NODE_USE_ENV_PROXY=1`.
+3. **Pain words glued unrelated posts together.** "Painful", "tedious" and "hours" were counted as
+   topic words, so six posts about six different tools became one lead. Fix: pain words count
+   toward the pain score only, never toward grouping. A test with six topics proves it.
+4. **Two rules had no test that caught them.** "Never investigate a lead twice" was hidden behind
+   the 30-day check, and nothing tested the 4-lookup limit. Fix: tests for both.
+5. **The admin page wouldn't build.** It read the clock while the page was being pre-built, which
+   this Next version refuses. Fix: the default opening time is filled in when a pack is picked.
+6. **The friend-link page would have pulled database code into the browser,** through the item
+   list. Fix: the old book's public details live in `lib/oldbook.ts`, which has no server code.
+7. **Payment library imports broke the route tests.** `@x402/next` imports `next/server` in a way
+   plain Node can't resolve. Fix: vitest processes that one package itself.
+
+### Tests
+
+- `lib/engine/drops.test.ts`: the price rule, the floor's climb, the drop phases, and cash only
+  (3,000 random haggles, no friends deal ever).
+- `lib/shop/shop.test.ts`, on real Postgres:
+  - holds never exceed copies, and only while the drop is open;
+  - unpaid holds come back, paid ones are sold, and if the chain is down nothing is released;
+  - races for the last copy;
+  - one drop per pack, and the onchain hook.
+- `app/api/haggle/drops.test.ts`, through the real route:
+  - not open yet, sold out, beaten to it;
+  - two handshakes at once for the last copy;
+  - the floor rises;
+  - no friends deal;
+  - the old book only through a friend's link.
+- `lib/research/research.test.ts`:
+  - the sources against recorded answers, including the encoding bug;
+  - every score part's rule, and a real week of posts;
+  - every coordinator check, link stripping and the code fence;
+  - the cost maths;
+  - the whole loop with a fake model: no spend when a check fails, skip when it exists, refusals
+    and network errors, the pack and its drop and email, automatic drop off, and the daily run.
+- `app/api/admin/admin.test.ts`:
+  - the first-visit password, the scrambled storage, the slowdown;
+  - the cookie gate, forged cookies and other sites' posts;
+  - the 12-hour login;
+  - preview and scheduling (emails to confirmed addresses only);
+  - the settings limits;
+  - the research cron's lock.
+
+As before, each rule was deleted in turn to check a test fails. The one rule no test catches on
+its own is the password's set-once guard in `lib/admin.ts`. The database's set-once write enforces
+the same thing, and that write has its own test.
