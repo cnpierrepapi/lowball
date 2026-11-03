@@ -49,7 +49,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
   const [muted, setMuted] = useState(false);
   // The game she asked for, and whether its board is open.
   const [game, setGame] = useState<{ id: string; kind: "snake" | "stack" }>();
-  const [playing, setPlaying] = useState(false);
+  const [playing, setPlaying] = useState<string>(); // the seed, once Start handed it out
 
   const [wallet, setWallet] = useState<Payer | null>(null);
   const installed = useSyncExternalStore(subscribeWallets, walletsSnapshot, walletsServerSnapshot);
@@ -193,8 +193,26 @@ export function Shop({ refNonce }: { refNonce?: string }) {
     }
   }
 
+  // Start is single use on the server, so it's called here, once, from the click.
+  async function startGame() {
+    if (!game || !session || busy) return;
+    sounds.current?.unlock();
+    setBusy(true);
+    setError(undefined);
+    try {
+      const r = await fetch("/api/game", { method: "POST", body: JSON.stringify({ op: "start", session, game: game.id }) });
+      const j = await r.json();
+      if (!r.ok) return gameFailed(j.error);
+      setPlaying(j.seed);
+    } catch {
+      setError(copy.errors.generic);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function gameDone(j: GameReply) {
-    setPlaying(false);
+    setPlaying(undefined);
     setGame(undefined);
     setSession(j.session);
     setAsk(j.ask);
@@ -202,7 +220,7 @@ export function Shop({ refNonce }: { refNonce?: string }) {
   }
 
   function gameFailed(code: string) {
-    setPlaying(false);
+    setPlaying(undefined);
     setGame(undefined);
     setError(errorText(code));
   }
@@ -437,8 +455,8 @@ export function Shop({ refNonce }: { refNonce?: string }) {
                 <p className="font-display text-lg font-extrabold leading-tight">{copy.game.offer(copy.game.names[game.kind])}</p>
                 <p className="text-sm">{copy.game.deal}</p>
                 <div className="mt-2 flex gap-2">
-                  <button onClick={() => { sounds.current?.unlock(); setPlaying(true); }} className="flex-1 rounded-full bg-[#151311] py-2 font-bold text-white">
-                    {copy.game.play}
+                  <button onClick={startGame} disabled={busy} className="flex-1 rounded-full bg-[#151311] py-2 font-bold text-white disabled:opacity-50">
+                    {busy ? copy.game.starting : copy.game.play}
                   </button>
                   <button onClick={() => setGame(undefined)} className="rounded-full border-2 border-[#151311] px-4 py-2 font-bold">
                     {copy.game.later}
@@ -530,10 +548,10 @@ export function Shop({ refNonce }: { refNonce?: string }) {
           kind={game.kind}
           id={game.id}
           session={session}
+          seed={playing}
           sounds={sounds}
           onDone={gameDone}
           onError={gameFailed}
-          onClose={() => setPlaying(false)}
         />
       )}
 

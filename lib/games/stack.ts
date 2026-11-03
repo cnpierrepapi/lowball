@@ -66,6 +66,8 @@ export function stackStep(s: StackState, drop = false): StackState {
     const left = Math.max(x, top.x);
     const right = Math.min(x + top.w, top.x + top.w);
     if (right - left <= 0) {
+      // The miss still uses up its tick, so the drop sits inside the game, before the stop tick.
+      s.tick += 1;
       s.alive = false;
       return s;
     }

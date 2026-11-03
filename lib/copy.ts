@@ -61,7 +61,6 @@ export const copy = {
     stop: "Stop here",
     sending: "She's checking your moves...",
     note: "She replays every move herself. Only her count counts.",
-    close: "Back to haggling",
   },
 
   referred: "A friend sent you. Haggle like they did, and your buy counts for them.",

@@ -170,7 +170,7 @@ export function fallbackLine(d: Decision): string {
     case "final_offer": return `[exasperated] ${ask}. Final. I mean it.`;
     case "raise": return `[sarcastic] Keep talking like that. It's ${ask} now.`;
     case "entertain_me": return `[yawns] ${ask}, and I'm bored. Entertain me. A round of ${GAME_NAMES[d.game ?? "snake"]}, and we'll see.`;
-    case "game_result": return `[unreadable] ${d.score ?? 0}. Hm. ${ask}, then.`;
+    case "game_result": return `[unimpressed] You scored ${d.score ?? 0}. ${ask}, then.`;
     default: return `[sighs] ${ask}. That's where we are.`;
   }
 }

@@ -117,7 +117,9 @@ export function postgresStore(): GameStore | undefined {
 }
 
 let override: GameStore | null | undefined;
-let devMemory: GameStore | undefined;
+// Local dev only. Kept on globalThis because dev reloads can give each route its own copy of
+// this module, and the haggle route and the game route must see the same games.
+const dev = globalThis as { lowballDevGames?: GameStore };
 
 /** For tests: put a store in, or null for "no store". undefined goes back to the default. */
 export function setGameStore(s: GameStore | null | undefined) {
@@ -133,6 +135,6 @@ export function gameStore(): GameStore | undefined {
   const pg = postgresStore();
   if (pg) return pg;
   if (process.env.NODE_ENV === "production") return undefined;
-  devMemory ??= memoryStore();
-  return devMemory;
+  dev.lowballDevGames ??= memoryStore();
+  return dev.lowballDevGames;
 }

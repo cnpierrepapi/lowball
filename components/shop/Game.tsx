@@ -8,7 +8,7 @@ import type { GameKind, Move } from "@/lib/games/replay";
 import type { Sounds } from "@/lib/client/sounds";
 
 // The game she asked for. This runs the exact same game code as the server, from the seed the
-// server hands out at Start, and only draws it. It records what the player pressed and on which
+// server handed out at Start (the shop calls Start once, before this opens), and only draws it. It records what the player pressed and on which
 // tick, and sends that. It never sends a score: the server replays the moves and counts.
 
 export interface GameReply {
@@ -24,22 +24,23 @@ interface Props {
   kind: GameKind;
   id: string;
   session: string;
+  seed: string;
   sounds: RefObject<Sounds | null>;
   onDone: (r: GameReply) => void;
   onError: (code: string) => void;
-  onClose: () => void;
 }
 
-type Phase = "starting" | "countdown" | "playing" | "sending";
+type Phase = "countdown" | "playing" | "sending";
 
 const INK = "#151311";
 const PAPER = "#fff6ea";
 const RED = "#ff4a24";
 const GREEN = "#19a866";
+const GOLD = "#f2b544";
 
-export function Game({ kind, id, session, sounds, onDone, onError, onClose }: Props) {
+export function Game({ kind, id, session, seed, sounds, onDone, onError }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const [phase, setPhase] = useState<Phase>("starting");
+  const [phase, setPhase] = useState<Phase>("countdown");
   const [count, setCount] = useState(3);
   const [score, setScore] = useState(0);
   const [left, setLeft] = useState(0);
@@ -67,18 +68,7 @@ export function Game({ kind, id, session, sounds, onDone, onError, onClose }: Pr
       }
     }
 
-    async function begin() {
-      let seed: string;
-      try {
-        const r = await fetch("/api/game", { method: "POST", body: JSON.stringify({ op: "start", session, game: id }) });
-        const j = await r.json();
-        if (!r.ok) return onError(j.error);
-        seed = j.seed;
-      } catch {
-        return onError("generic");
-      }
-      if (dead) return;
-
+    function begin() {
       const tickMs = kind === "snake" ? SNAKE.tickMs : STACK.tickMs;
       const maxTicks = kind === "snake" ? SNAKE.maxTicks : STACK.maxTicks;
       const snake = kind === "snake" ? snakeStart(seed) : undefined;
@@ -104,7 +94,6 @@ export function Game({ kind, id, session, sounds, onDone, onError, onClose }: Pr
       };
       stop.current = end;
 
-      setPhase("countdown");
       draw(canvas.current, snake, stack);
       for (let i = 1; i <= 3; i++) timers.push(setTimeout(() => setCount(3 - i), i * 700));
       timers.push(setTimeout(() => {
@@ -213,16 +202,14 @@ export function Game({ kind, id, session, sounds, onDone, onError, onClose }: Pr
           />
           {phase !== "playing" && (
             <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/70 p-6 text-center font-display text-xl font-extrabold">
-              {phase === "starting" ? copy.game.starting : phase === "countdown" ? copy.game.countdown(Math.max(1, count)) : copy.game.sending}
+              {phase === "countdown" ? copy.game.countdown(Math.max(1, count)) : copy.game.sending}
             </div>
           )}
         </div>
         <p className="text-xs text-[#151311]/60">{copy.game.note}</p>
-        {phase === "playing" ? (
+        {phase === "playing" && (
           <button onClick={() => stop.current()} className="rounded-full border-2 border-[#151311] py-2 font-bold">{copy.game.stop}</button>
-        ) : phase === "starting" ? (
-          <button onClick={onClose} className="rounded-full border-2 border-[#151311] py-2 font-bold">{copy.game.close}</button>
-        ) : null}
+        )}
       </div>
     </div>
   );
@@ -256,13 +243,13 @@ function draw(c: HTMLCanvasElement | null, snake?: SnakeState, stack?: StackStat
     for (let i = base; i < stack.tower.length; i++) {
       const b = stack.tower[i];
       const y = c.height - (i - base + 1) * h;
-      g.fillStyle = i === 0 ? INK : i % 2 ? RED : GREEN;
+      g.fillStyle = i === 0 ? INK : i % 2 ? GREEN : GOLD;
       g.fillRect(b.x * unit, y, b.w * unit, h - 2);
     }
     if (stack.alive) {
       const top = stack.tower[stack.tower.length - 1];
       const y = c.height - (shown + 1) * h;
-      g.fillStyle = INK;
+      g.fillStyle = RED;
       g.fillRect(slidingX(stack) * unit, y, top.w * unit, h - 2);
     }
   }

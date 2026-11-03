@@ -135,6 +135,25 @@ describe("stack replay", () => {
     expect(s.score).toBe(0);
   });
 
+  it("a game that ends on a miss replays cleanly (the browser's log isn't refused)", () => {
+    const s = stackStart(A);
+    const moves: Move[] = [];
+    const top = s.tower[0];
+    for (let i = 0; i < 500 && Math.abs(slidingX(s) - top.x) < top.w; i++) stackStep(s);
+    moves.push([s.tick, 1]);
+    stackStep(s, true);
+    expect(s.alive).toBe(false);
+    expect(replay("stack", A, { moves, end: s.tick })).toEqual({ ok: true, score: 0, ticks: s.tick });
+  });
+
+  it("a snake game that ends in a crash replays cleanly too", () => {
+    const s = snakeStart(A);
+    const moves: Move[] = [[0, 0]];
+    snakeStep(s, 0);
+    while (s.alive) snakeStep(s);
+    expect(replay("snake", A, { moves, end: s.tick })).toEqual({ ok: true, score: s.score, ticks: s.tick });
+  });
+
   it("overhang is cut off, so the tower only gets narrower", () => {
     const s = stackStart(A);
     for (let i = 0; i < 7; i++) stackStep(s);
