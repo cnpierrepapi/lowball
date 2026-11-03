@@ -42,3 +42,8 @@ next-env.d.ts
 
 # local devnet keys
 .keys/
+
+# assistant notes, never committed (next dev writes AGENTS.md on its own)
+AGENTS.md
+CLAUDE.md
+.claude/
