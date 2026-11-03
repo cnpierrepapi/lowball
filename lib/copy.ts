@@ -63,6 +63,18 @@ export const copy = {
     note: "She replays every move herself. Only her count counts.",
   },
 
+  mail: {
+    line: "I get new stuff in. Not often. Leave your email and I'll tell you when.",
+    placeholder: "you@somewhere.com",
+    button: "Tell me",
+    done: "Check your inbox. Click the link or I forget you exist.",
+    confirmButton: "Yes, that's me",
+    confirmed: "You're on the list. I'll write when there's something worth haggling over.",
+    unsubLine: "Want out?",
+    unsubButton: "Take me off",
+    unsubscribed: "Gone. Your email's out of my book.",
+  },
+
   referred: "A friend sent you. Haggle like they did, and your buy counts for them.",
 
   wallet: {
@@ -90,6 +102,9 @@ export const copy = {
     not_set_up: "The shop isn't open yet. The owner forgot a key.",
     tap_dry: "The shop's out of test money. Grab devnet USDC at faucet.circle.com.",
     wallet_refused: "Your wallet said no. Try again, or take a demo wallet.",
+    bad_email: "That's not an email.",
+    signup_slow: "Easy. Try again in a minute.",
+    link_gone: "That link's gone cold.",
     no_game: "That game went cold. Keep haggling.",
     game_rejected: "She watched the replay and didn't buy it. Nothing changed.",
     generic: "Something broke. Try again.",

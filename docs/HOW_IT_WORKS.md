@@ -157,3 +157,158 @@ Each rule was checked by deleting it and confirming a test fails (26 rules, all 
    reloads gave the haggle route and the game route separate copies of it, so Start couldn't
    find the game the haggle had just offered. Fix: the dev store sits on `globalThis` so every
    route shares it. Production uses Postgres and wasn't affected.
+
+## Drop emails with double opt-in
+
+### What it does
+
+Below the haggle there's a box: "I get new stuff in. Not often. Leave your email and I'll tell
+you when." Leaving an address sends one email, "Confirm it's you", with a link. Only addresses
+that click it ever get a drop email. Every drop email has a link to leave the list, and leaving
+deletes the address.
+
+### What data moves where
+
+1. **Signup** (`POST /api/mail/signup`). The browser sends only the address, and only to our
+   server. The server:
+   - limits each IP to 5 signups a minute and 20 an hour;
+   - trims and lowercases the address;
+   - checks it has one `@`, a dotted domain, no spaces, and is 254 characters or fewer;
+   - checks the domain can receive mail (a DNS lookup, 2 seconds at most; if DNS doesn't answer,
+     the address is let through).
+
+   Then it saves the row in the `subscribers` table: email, signup time, confirmed = no, and two
+   random values called nonces (one for confirming, one for leaving). The answer to the browser
+   is the same whatever happened, so nobody can use the box to find out who's on the list.
+2. **The confirmation email.** It goes into the `outbox` table and is sent straight away if
+   today's cap allows. Otherwise it goes out the next day.
+3. **The links.** A link carries a token made from the row's nonce and the server's secret key
+   (`OFFER_SIGNING_KEY`), labelled "confirm" or "unsub". The database holds the nonce and a hash
+   of the token, never the token itself. So:
+   - someone who reads the database can't make a working link;
+   - a confirm link can't unsubscribe, and an unsubscribe link can't confirm;
+   - one person's link only ever touches their own row;
+   - a made-up token matches nothing.
+4. **Confirming** (`/confirm` page, then `POST /api/mail/confirm`). Opening the link only shows a
+   page with a "Yes, that's me" button. Pressing it confirms. This is because mail scanners open
+   every link in an email to check it, and a link that worked on opening would sign people up
+   without them. A confirm link works once, and for 7 days.
+5. **Signing up again.**
+   - Already confirmed: nothing happens.
+   - Not confirmed, and the last link went out less than an hour ago: nothing happens.
+   - Not confirmed, and the last link went out over an hour ago: a fresh link goes out, and the
+     old link stops working.
+6. **Leaving** (`/unsubscribe` page with a "Take me off" button, or the one-click unsubscribe
+   that mail apps show). This deletes the row. Anything still queued for that address is
+   deleted with it.
+7. **A drop.** `announceDrop` queues one email per **confirmed** address, then starts sending.
+   Announcing the same drop twice queues nothing new. The auctions feature will call this when a
+   drop is scheduled. The email says when haggling opens, like "Thu 6 Nov, 18:00 UTC".
+8. **Sending and the cap.** Everything Lowball sends goes through the outbox, so the cap covers
+   all of it, confirmations included. Each round of sending:
+   - takes a database lock, so two servers sending at once take turns;
+   - counts what's gone out today (UTC) in `mail_days`;
+   - takes at most `LOWBALL_MAIL_DAILY_CAP` minus that (default 40, at most 500, and a bad value
+     falls back to 40), confirmations first;
+   - sends a drop email only to a confirmed address, and a confirmation only to an unconfirmed
+     one. This is checked again at the moment of sending.
+
+   A failed send still counts against the cap. It's retried 10 minutes later at the earliest, and
+   given up after 3 tries.
+9. **The daily cron.** Once a day Vercel calls `/api/cron/mail` (in `vercel.json`), which sends
+   whatever didn't fit under yesterday's cap. The route only answers a request carrying
+   `Authorization: Bearer <CRON_SECRET>`. If `CRON_SECRET` isn't set, or is shorter than 16
+   characters, it answers nobody.
+10. **Live or not.** Only `MAIL_LIVE=1` (exactly that) sends through Zoho: port 465, a secure
+    connection, the host from `ZOHO_SMTP_HOST` (default `smtp.zoho.eu`), and the address and
+    password from `ZOHO_MAIL_USER` and `ZOHO_APP_PASSWORD`. The emails come from "Lowball".
+    Without it, the log says who would have got which subject, with the address part-hidden and
+    no links. Tests swap in a fake mailbox and never send anything.
+11. **Links point at the right site.** The live site in production, the preview's own address on
+    a preview, localhost in development. `LOWBALL_SITE_URL` overrides all of these if it's set.
+
+### The database, and migrations
+
+`db/002_mail.sql` adds `subscribers`, `outbox` and `mail_days`. `npm run build` now runs
+`scripts/migrate.mts` before `next build`:
+- On Vercel, `DATABASE_URL` is set, so any SQL file in `db/` that hasn't run yet runs in one
+  transaction, together with a note in `schema_migrations` that it ran.
+- A broken file changes nothing.
+- Without `DATABASE_URL`, the step skips.
+- Files only ever add things.
+
+`/api/health` now reports:
+- `database` (true, or "unreachable"; never the error text, which could carry connection
+  details);
+- `tables` (true when the four tables exist, which proves the migration ran);
+- `mail` (fails only when `MAIL_LIVE=1` and the Zoho settings are missing);
+- a true/false for each mail setting being present. It never shows a value.
+
+### What could break it
+
+- **The shared mailbox.** The Zoho mailbox is shared with another product, so a busy day there
+  can use up Zoho's own limit. Lowball's sends then fail, get logged, and are retried later.
+- **Spam folders.** Whether mail lands in the inbox depends on the domain's SPF and DKIM records
+  in Zoho. The code can't check that.
+- **Previews share the live database**, because `DATABASE_URL` is set for all environments. A
+  test signup on a preview is a real row.
+- **The cap under real concurrency.** The lock that makes two senders take turns can't be proven
+  in the tests, which run one connection at a time (PGlite). The test with two senders at once
+  passes, but it would pass without the lock too. On Neon, the lock is standard Postgres
+  behaviour.
+- **A slow DNS answer lets an address through.** At worst a confirmation goes nowhere and the row
+  just stays unconfirmed.
+
+### Tests
+
+The SQL runs on real Postgres in memory (PGlite), with the same migration files as production.
+
+- `lib/mail/mail.test.ts`:
+  - addresses: good ones accepted and lowercased; 17 bad shapes and non-strings refused; the
+    254-character limit; dead domains refused;
+  - tokens: unique, labelled by purpose, need the server key, never stored;
+  - double opt-in: one email, single use, 7 days, can't cross addresses or purposes, the hourly
+    resend, nothing for confirmed addresses;
+  - drops: confirmed addresses only, even when forced into the queue; once per drop; the
+    unsubscribe link and header work; leaving clears the queue;
+  - the cap: holds, the rest go the next day, confirmations count, zero means none, two senders
+    at once, retries and giving up;
+  - `MAIL_LIVE` must be exactly "1";
+  - both emails word for word, and the date format.
+- `lib/db.test.ts`: migrations run once, and a broken file leaves nothing half done. The games
+  store's SQL on real Postgres: single-use start and finish, tied to the haggle.
+- `app/api/mail/mail-routes.test.ts`, through the real routes:
+  - signup saves, lowercases and sends;
+  - bad addresses never reach the database;
+  - the same answer for new, repeated and confirmed addresses;
+  - the rate limit;
+  - no database gives a 503;
+  - confirm works once;
+  - one-click unsubscribe from the header;
+  - the cron turns away a missing, wrong, same-length-wrong or too-short secret.
+
+As with games, each rule was deleted in turn to check a test fails (24 rules). The first pass
+found four rules with no test that caught them; see the bugs below.
+
+### Bugs hit while building it, and the fixes
+
+1. **The tests took two minutes**, because each test started its own in-memory Postgres. Fix: one
+   database per test file, with the tables wiped between tests. Now it takes 5 seconds.
+2. **Four rules weren't really tested.**
+   - An address confirmed while its confirmation email was still queued would still get that
+     email. Fix: a new test.
+   - The 254-character test address was also refused for a domain part over 63 characters, so
+     the length rule itself was never tested. My first two attempts at a fix had the arithmetic
+     wrong (254 instead of 255, then a 64-character part). Fix: an address of exactly 254 that
+     passes, and 255 that fails, with every part valid.
+   - The cron secret was only ever tried with wrong values of a different length, which the
+     length check catches before the real comparison runs. Fix: a test with a wrong secret of
+     the same length.
+   - A too-short `CRON_SECRET` was never tried. Fix: a new test.
+3. **A guard that wasn't a rule.** "Only send after a signup if something was queued" was just a
+   shortcut, and no test could tell it apart from sending anyway. Fix: removed.
+4. **Lockfile noise.** The npm here (version 10) stripped the `libc` fields from
+   `package-lock.json`. Fix: installs are done with npm 11, so the lockfile diff is only the new
+   packages.
+5. **Stopping the dev server killed my own shell** halfway through writing these notes, so they
+   had to be written twice. Nothing in the app was affected.

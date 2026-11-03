@@ -6,6 +6,7 @@ import type { Wallet as StdWallet } from "@wallet-standard/base";
 import { Keeper } from "@/components/keeper/Keeper";
 import { Markdown } from "@/components/Markdown";
 import { Game, type GameReply } from "@/components/shop/Game";
+import { Signup } from "@/components/shop/Signup";
 import type { Keeper as Controller } from "@/components/keeper/scene";
 import { copy } from "@/lib/copy";
 import { formatUsdc } from "@/lib/engine/money";
@@ -510,6 +511,8 @@ export function Shop({ refNonce }: { refNonce?: string }) {
         )}
 
         {error && <p className="rounded-xl bg-[#ffe1d6] px-3 py-2 text-sm font-semibold">{error}</p>}
+
+        <Signup />
 
         {/* Wallet strip */}
         <div className="mt-auto flex items-center justify-between gap-2 rounded-xl border-2 border-[#151311]/15 px-3 py-2 text-sm">

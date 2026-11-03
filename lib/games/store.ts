@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db, type Db } from "../db";
 import { GAME_CLOCK, type GameKind } from "./replay";
 
 // Where games live between Offer, Start and Finish. Postgres (Neon) in production, memory in
@@ -81,36 +81,40 @@ export function memoryStore(clock: () => number = Date.now): GameStore & { rows:
 
 // The database's clock times Start and Finish, so serverless instances with drifting clocks
 // all agree on how long a game took.
-export function postgresStore(): GameStore | undefined {
-  const sql = db();
-  if (!sql) return undefined;
+export function postgresStore(sql: Db): GameStore {
   return {
     async offer(g) {
-      await sql`INSERT INTO games (id, haggle, kind, seed) VALUES (${g.id}, ${g.haggle}, ${g.kind}, ${g.seed})`;
+      await sql.query("INSERT INTO games (id, haggle, kind, seed) VALUES ($1, $2, $3, $4)", [g.id, g.haggle, g.kind, g.seed]);
     },
     async start(id, haggle) {
-      const rows = await sql`
-        UPDATE games SET started_at = now()
-        WHERE id = ${id} AND haggle = ${haggle} AND started_at IS NULL
-          AND offered_at > now() - make_interval(secs => ${START_WINDOW_MS / 1000})
-        RETURNING kind, seed`;
-      const r = rows[0] as { kind: GameKind; seed: string } | undefined;
-      return r && { kind: r.kind, seed: r.seed };
+      const rows = await sql.query<{ kind: GameKind; seed: string }>(
+        `UPDATE games SET started_at = now()
+         WHERE id = $1 AND haggle = $2 AND started_at IS NULL
+           AND offered_at > now() - make_interval(secs => $3)
+         RETURNING kind, seed`,
+        [id, haggle, START_WINDOW_MS / 1000],
+      );
+      const r = rows[0];
+      return r && { kind: r.kind, seed: r.seed.trim() };
     },
     async playing(id, haggle) {
-      const rows = await sql`
-        SELECT kind, seed, haggle, (extract(epoch FROM now() - started_at) * 1000)::float8 AS elapsed
-        FROM games
-        WHERE id = ${id} AND haggle = ${haggle} AND started_at IS NOT NULL AND finished_at IS NULL`;
-      const r = rows[0] as { kind: GameKind; seed: string; haggle: string; elapsed: number } | undefined;
-      if (!r || r.elapsed > finishWindowMs(r.kind)) return undefined;
-      return { kind: r.kind, seed: r.seed, haggle: r.haggle, elapsedMs: Number(r.elapsed) };
+      const rows = await sql.query<{ kind: GameKind; seed: string; haggle: string; elapsed: number }>(
+        `SELECT kind, seed, haggle, (extract(epoch FROM now() - started_at) * 1000)::float8 AS elapsed
+         FROM games
+         WHERE id = $1 AND haggle = $2 AND started_at IS NOT NULL AND finished_at IS NULL`,
+        [id, haggle],
+      );
+      const r = rows[0];
+      if (!r || Number(r.elapsed) > finishWindowMs(r.kind)) return undefined;
+      return { kind: r.kind, seed: r.seed.trim(), haggle: r.haggle, elapsedMs: Number(r.elapsed) };
     },
     async finish(id, score, outcome) {
-      const rows = await sql`
-        UPDATE games SET finished_at = now(), score = ${score}, outcome = ${outcome}
-        WHERE id = ${id} AND started_at IS NOT NULL AND finished_at IS NULL
-        RETURNING id`;
+      const rows = await sql.query(
+        `UPDATE games SET finished_at = now(), score = $2, outcome = $3
+         WHERE id = $1 AND started_at IS NOT NULL AND finished_at IS NULL
+         RETURNING id`,
+        [id, score, outcome],
+      );
       return rows.length === 1;
     },
   };
@@ -132,8 +136,8 @@ export function setGameStore(s: GameStore | null | undefined) {
  */
 export function gameStore(): GameStore | undefined {
   if (override !== undefined) return override ?? undefined;
-  const pg = postgresStore();
-  if (pg) return pg;
+  const sql = db();
+  if (sql) return postgresStore(sql);
   if (process.env.NODE_ENV === "production") return undefined;
   dev.lowballDevGames ??= memoryStore();
   return dev.lowballDevGames;
