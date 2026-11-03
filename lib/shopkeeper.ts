@@ -90,35 +90,57 @@ const ACTION_BRIEF: Record<Decision["action"], string> = {
 const GAME_NAMES = { snake: "Snake", stack: "Stack" } as const;
 
 
+/** The numbers she may say this turn, kept apart by kind: prices, and counts (friends, a game score). */
+export interface Allowed {
+  money: Set<string>;
+  counts: Set<string>;
+}
+
 // Every number the shopkeeper may say out loud this turn.
-export function allowedNumbers(item: Item, d: Decision, intent: Intent): Set<string> {
-  const ok = new Set<string>();
-  const money = (m: number) => {
-    ok.add(formatUsdc(m));
-    ok.add(String(Number(formatUsdc(m))));
+export function allowedNumbers(item: Item, d: Decision, intent: Intent): Allowed {
+  const money = new Set<string>();
+  const counts = new Set<string>();
+  const price = (m: number) => {
+    money.add(formatUsdc(m));
+    money.add(String(Number(formatUsdc(m))));
   };
-  money(d.ask);
-  money(item.list);
-  if (d.deal) money(d.deal.price);
-  if (intent.amount !== undefined) money(Math.round(intent.amount * 1_000_000));
+  price(d.ask);
+  price(item.list);
+  if (d.deal) price(d.deal.price);
+  if (intent.amount !== undefined) price(Math.round(intent.amount * 1_000_000));
   for (const n of [d.referralsNeeded, intent.referrals, d.deal?.kind === "pledge" ? d.deal.referrals : undefined, d.score]) {
-    if (n !== undefined) ok.add(String(n));
+    if (n !== undefined) counts.add(String(n));
   }
-  return ok;
+  return { money, counts };
 }
 
-export function numbersIn(line: string): string[] {
-  return line.replace(/\[[^\]]*\]/g, "").match(/\d+(?:\.\d+)?/g) ?? [];
+/** Every number the model is told it may use (for the prompt). */
+export function allowedList(a: Allowed): string[] {
+  return [...a.money, ...a.counts];
 }
 
-export function lineIsHonest(line: string, allowed: Set<string>): boolean {
-  const has = (n: string) => allowed.has(n) || allowed.has(String(Number(n)));
-  if (!numbersIn(line).every(has)) return false;
+// A number in digits is a count only when it sits next to what's being counted ("4 friends",
+// "scored 7"). Anything else must be an allowed price, so a friend count or a game score can't
+// be passed off as one ("hand over 4 for the book", when 4 was a friend count).
+const COUNT_AFTER = /^\s*(friends?|people|pals|buyers|points?|of them|more of)\b/;
+const COUNT_BEFORE = /(scored|score of|score is|score:|a score)\s*$/;
+
+export function lineIsHonest(line: string, allowed: Allowed): boolean {
+  const isMoney = (n: string) => allowed.money.has(n) || allowed.money.has(String(Number(n))) || allowed.money.has(Number(n).toFixed(2));
+  const isCount = (n: string) => allowed.counts.has(String(Number(n)));
+  const text = line.replace(/\[[^\]]*\]/g, " ");
+  for (const m of text.matchAll(/\d+(?:\.\d+)?/g)) {
+    const n = m[0];
+    const before = text.slice(Math.max(0, m.index! - 16), m.index!).toLowerCase();
+    const after = text.slice(m.index! + m[0].length, m.index! + m[0].length + 20).toLowerCase();
+    const count = !n.includes(".") && (COUNT_AFTER.test(after) || COUNT_BEFORE.test(before));
+    if (count ? !isCount(n) : !isMoney(n)) return false;
+  }
   // The same rule for numbers said in words.
   return spokenNumbers(line).every((s) => {
     if (s.kind === "unreadable") return false;
-    const money = has(s.value.toFixed(2));
-    const count = allowed.has(String(s.value));
+    const money = isMoney(s.value.toFixed(2));
+    const count = isCount(String(s.value));
     return s.kind === "money" ? money : s.kind === "count" ? count : money || count;
   });
 }
@@ -193,7 +215,7 @@ Rules:
 
   const turn = `What you must do this turn: ${fillBrief(d, before)}
 ${d.insulted ? "Their offer was an insult. React to it." : ""}
-Numbers you may use: ${[...allowed].join(", ")}
+Numbers you may use: ${allowedList(allowed).join(", ")}
 
 Recent conversation:
 ${recentOf(history)}

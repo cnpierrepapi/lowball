@@ -4,7 +4,7 @@ import type { Db } from "../db";
 import { checkEmail, normalizeEmail } from "./address";
 import { hashToken, looksLikeToken, newNonce, tokenFor } from "./tokens";
 import { mailStore, type MailStore } from "./store";
-import { dailyCap, logMailer, mailer, mailSettings, type Mailer } from "./mailer";
+import { dailyCap, logMailer, mailerWith, mailSettings, type Mailer } from "./mailer";
 import { announceDrop, drain } from "./outbox";
 import { confirmEmail, dropEmail, formatOpensAt, type DropInfo, type Email } from "./templates";
 import { siteUrl } from "../site";
@@ -302,7 +302,7 @@ describe("sending switch", () => {
     expect(mailSettings({ MAIL_LIVE: "true" }).live).toBe(false);
     expect(mailSettings({ MAIL_LIVE: "1" }).live).toBe(true);
     delete process.env.MAIL_LIVE;
-    expect(mailer().live).toBe(false);
+    expect(mailerWith(false).live).toBe(false);
   });
   it("defaults the Zoho host to smtp.zoho.eu", () => {
     expect(mailSettings({}).host).toBe("smtp.zoho.eu");
